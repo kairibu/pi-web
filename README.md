@@ -1,25 +1,89 @@
-# Pi Web POC
+# Pi Web
 
-Small web wrapper around `@mariozechner/pi-coding-agent`.
+A web control plane for remote, agentic software development with [Pi Coding Agent](https://github.com/mariozechner/pi).
 
-## What it does
+Pi Web lets you run coding agents on a server, organize their work by project and workspace, and steer sessions from a browser. Your laptop becomes a window into persistent development environments instead of the place where all development has to happen.
 
-- Add/list projects.
-- Discover workspaces from `git worktree list --porcelain`.
-- For non-git projects, show the project folder as the only workspace.
-- List Pi sessions for a workspace using Pi's default session storage.
-- Start Pi sessions, chat over WebSocket events, and stop individual session runtimes.
+## Why use Pi Web?
 
-## State
+Modern AI development does not need to be constrained by a local IDE, a single terminal, or a laptop that must stay open. Agents can work in long-lived server environments, across multiple repositories and worktrees, while humans supervise, steer, review, and organize the work through a web UI.
 
-This POC intentionally keeps state minimal:
+Pi Web is for developers who want:
+
+- persistent remote agent sessions;
+- browser access to server-side development environments;
+- project and workspace organization for many concurrent tasks;
+- git-worktree-based workflows for parallel feature development;
+- a human-in-the-loop interface designed around agents first;
+- a foundation for adding terminals, file trees, git views, planning docs, kanban boards, review queues, deployment controls, and other workflow surfaces.
+
+It is not trying to recreate the old desktop IDE in a browser. It is a control surface for agent-driven development.
+
+## Core model
+
+Pi Web organizes work into three levels:
+
+```text
+Project     a folder on the server
+Workspace   a git worktree, or the project folder for non-git projects
+Session     a chat with Pi Coding Agent running inside a workspace
+```
+
+This maps naturally to real development work:
+
+- add a project once;
+- use worktrees to separate branches, features, experiments, and reviews;
+- start one or more agent sessions inside each workspace;
+- leave sessions running even when the browser disconnects or the UI restarts.
+
+## Features
+
+- Add and list server-side projects.
+- Discover git worktrees automatically with `git worktree list --porcelain`.
+- Support non-git folders as single-workspace projects.
+- Start, resume, archive, and restore Pi sessions per workspace.
+- Chat with Pi Coding Agent through realtime WebSocket events.
+- Keep active agent runtimes alive across browser disconnects and web/API restarts.
+- Explicitly stop or abort active session work.
+- View live session status: streaming, compaction, bash activity, token usage, cost, model, and context usage.
+- Send prompts, shell input, and supported commands through the Pi SDK path.
+- Reuse your existing Pi auth and model configuration from `~/.pi/agent`.
+
+## Architecture
+
+Pi Web uses a split-process architecture so agent runtimes are not owned by the browser-facing dev server.
+
+```text
+Browser UI
+   │
+   ▼
+Fastify Web/API process
+   │ HTTP + WebSocket proxy
+   ▼
+Session daemon
+   │
+   ▼
+Pi Coding Agent SDK
+```
+
+### Session daemon
+
+The session daemon owns active Pi session runtimes. It is intended to be long-lived so sessions can survive browser disconnects and web/API restarts.
+
+### Web/API/UI server
+
+The web process serves the API and browser UI. In development it can autoreload freely while active sessions continue running in the daemon.
+
+## State model
+
+Pi Web keeps its own state intentionally small:
 
 - Projects: `~/.pi-web/projects.json`
-- Workspaces: discovered from git, not stored
-- Sessions/chat history: Pi default JSONL session storage
-- Active session runtimes/WebSockets: memory only in `pi-web-sessiond`
+- Workspaces: discovered from git worktrees, not stored
+- Sessions and chat history: Pi's default JSONL session storage
+- Active session runtimes and WebSockets: memory in the session daemon
 
-## Run
+## Quick start
 
 ```bash
 npm install
@@ -28,7 +92,7 @@ npm run dev
 
 Open the Vite URL, usually <http://localhost:5173>.
 
-The session runtime owner is split into a tiny long-lived daemon. To iterate on only the web/API/UI process while keeping active Pi sessions alive, run these in separate terminals:
+For the recommended split development setup, run these in separate terminals:
 
 ```bash
 npm run dev:sessiond
@@ -36,16 +100,41 @@ npm run dev:web
 npm run dev:client
 ```
 
-Then restart `dev:web` or `dev:client` freely; active Pi sessions continue in `dev:sessiond`.
+You can restart `dev:web` or `dev:client` without stopping active Pi sessions.
 
-### systemd user services for local development
+## Production-style run
 
-This repository is commonly run as two systemd user services:
+```bash
+npm run build
+npm run start:sessiond
+PI_WEB_PORT=3000 npm start
+```
 
-- `pi-web-sessiond.service`: runs `npm run start:sessiond` without autoreload or automatic restart.
-- `pi-web-ui-dev.service`: runs `npm run dev:web` and `npm run dev:client` together, giving backend autoreload via `tsx watch` and Vite UI HMR.
+The web server defaults to `127.0.0.1:3000`. Set `PI_WEB_HOST=0.0.0.0` only when you intentionally want to bind directly on all interfaces.
 
-Example units live in `~/.config/systemd/user/` on the development host:
+The session daemon defaults to a private Unix socket at:
+
+```text
+~/.pi-web/sessiond.sock
+```
+
+Environment variables:
+
+- `PI_WEB_PORT` / `PORT` — web server port. Defaults to `3000`.
+- `PI_WEB_HOST` — web server bind host. Defaults to `127.0.0.1`.
+- `PI_WEB_SESSIOND_SOCKET` — Unix socket path used by both the daemon and web process when `PI_WEB_SESSIOND_URL` is not set. Defaults to `~/.pi-web/sessiond.sock`.
+- `PI_WEB_SESSIOND_PORT` — optional TCP port for the daemon. If unset, the daemon listens on the Unix socket instead.
+- `PI_WEB_SESSIOND_HOST` — daemon TCP bind host when `PI_WEB_SESSIOND_PORT` is set. Defaults to `127.0.0.1`.
+- `PI_WEB_SESSIOND_URL` — daemon URL used by the web process when connecting over TCP, for example `http://127.0.0.1:3001`. If you set `PI_WEB_SESSIOND_PORT`, set this for the web process too.
+
+## systemd user services
+
+A practical local or server setup is two user services:
+
+- `pi-web-sessiond.service` runs `npm run start:sessiond` without autoreload.
+- `pi-web-ui-dev.service` runs `npm run dev:web` and `npm run dev:client` for API reloads and Vite HMR.
+
+Example units:
 
 ```ini
 # ~/.config/systemd/user/pi-web-sessiond.service
@@ -94,28 +183,26 @@ journalctl --user -u pi-web-sessiond.service -f
 journalctl --user -u pi-web-ui-dev.service -f
 ```
 
-Because `sessiond` is intentionally not watched or restarted automatically, code changes that affect `src/server/sessiond.ts` or session runtime ownership require manually restarting `pi-web-sessiond.service`:
+If code affecting the session daemon changes, restart it manually:
 
 ```bash
 systemctl --user restart pi-web-sessiond.service
 ```
 
-Restarting only the UI dev service is enough for changes in the web/API/UI processes.
+## Current limitations
 
-For deployment:
+- Assumes trusted users and trusted server paths.
+- Not a sandbox, permission model, or secure multi-tenant platform.
+- Some Pi TUI slash-command behavior is not yet represented exactly in the web UI.
+- Workspaces are discovered from existing git worktrees; UI-driven worktree management is a natural next step.
 
-```bash
-npm run build
-npm run start:sessiond
-PI_WEB_PORT=3000 npm start
-```
+## Vision
 
-Then proxy Traefik to `http://127.0.0.1:3000`.
+Pi Web is the beginning of an agent-first development environment:
 
-The web server defaults to `127.0.0.1:3000`. Use `PI_WEB_HOST=0.0.0.0` only if you want to bind directly on all interfaces. The session daemon defaults to a private Unix socket at `~/.pi-web/sessiond.sock`; override with `PI_WEB_SESSIOND_SOCKET` or use TCP with `PI_WEB_SESSIOND_PORT` plus `PI_WEB_SESSIOND_URL` for the web process.
+- agents run persistently on servers;
+- humans connect through the browser;
+- work is organized by projects, workspaces, and sessions;
+- the UI grows around the needs of agentic development rather than the habits of local IDEs.
 
-## Notes
-
-- The backend uses your normal Pi auth/model settings from `~/.pi/agent`.
-- Slash commands that belong to Pi's interactive TUI, such as `/model`, are not implemented in this POC UI yet. Plain prompts and extension/prompt-template handling go through the SDK path.
-- Browser disconnects and web-server restarts do not stop active Pi sessions. Only the explicit `Stop session` action aborts/disposes that one session runtime.
+The goal is simple: make it practical to run more development remotely, in parallel, with agents as first-class participants and humans focused on direction, judgment, and review.
