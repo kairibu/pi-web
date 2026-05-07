@@ -72,6 +72,7 @@ export const chatStyles = css`
   .part:is(details) { border-top: 1px solid #30363d; padding-top: 8px; }
   summary { cursor: pointer; color: #8b949e; }
   pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+  .shell-output { color: #e6edf3; font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.45; }
 `;
 
 export const formattedTextStyles = css`

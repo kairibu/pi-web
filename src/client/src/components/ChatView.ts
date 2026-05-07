@@ -44,7 +44,7 @@ export class ChatView extends LitElement {
     return html`
       <article class="msg ${message.role}" data-index=${index}>
         <b class="label">${message.role}</b>
-        ${message.parts.map((part) => this.renderPart(part))}
+        ${message.parts.map((part) => this.renderPart(part, message))}
       </article>
     `;
   }
@@ -61,7 +61,7 @@ export class ChatView extends LitElement {
           ${messages.map((message) => html`
             <section class="group-msg ${message.role}">
               <b class="label">${message.role}</b>
-              ${message.parts.map((part) => this.renderPart(part))}
+              ${message.parts.map((part) => this.renderPart(part, message))}
             </section>
           `)}
         </div>
@@ -69,7 +69,8 @@ export class ChatView extends LitElement {
     `;
   }
 
-  private renderPart(part: ChatPart) {
+  private renderPart(part: ChatPart, message?: ChatLine) {
+    if (part.type === "text" && message?.role === "bash") return html`<pre class="part shell-output">${part.text}</pre>`;
     if (part.type === "text") return html`<formatted-text class="part" .text=${part.text}></formatted-text>`;
     if (part.type === "thinking") return html`<details class="part"><summary>thinking</summary><formatted-text .text=${part.text}></formatted-text></details>`;
     if (part.type === "toolCall") return html`<div class="part tool-line">▶ ${part.toolName}<span class="summary">${part.summary}</span></div>`;

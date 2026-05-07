@@ -31,13 +31,12 @@ function normalizeMessage(message: any): ChatLine[] {
 }
 
 function normalizeBashExecution(message: any): ChatLine {
-  const lines = [`$ ${message.command ?? ""}`];
+  const lines = message.excludeFromContext ? ["excluded from context", "", `$ ${message.command ?? ""}`] : [`$ ${message.command ?? ""}`];
   if (message.output) lines.push("", String(message.output));
   if (message.exitCode != null) lines.push("", `exit ${message.exitCode}`);
   if (message.cancelled) lines.push("", "cancelled");
   if (message.truncated) lines.push("", "output truncated");
   if (message.fullOutputPath) lines.push("", `full output: ${message.fullOutputPath}`);
-  if (message.excludeFromContext) lines.push("", "excluded from context");
   return { role: "bash", parts: [{ type: "text", text: lines.join("\n") }] };
 }
 
