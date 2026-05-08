@@ -153,6 +153,21 @@ npm run start:sessiond
 PI_WEB_PORT=8504 npm start
 ```
 
+## Packaging and publishing
+
+```bash
+npm run verify
+npm run pack:dry
+npm publish --access public
+```
+
+`prepack` builds `dist/` before npm creates the tarball, and `prepublishOnly` runs verification before publishing. Releases can also be published by the GitHub Actions npm workflow when a GitHub release is published.
+
+Pi Web uses a single-line CalVer-inspired npm version: `MAJOR.YYYYMM.SEQUENCE`, for example `1.202605.1`. The major number signals breaking-change eras; the middle number is the release month; the final number increments for additional releases in that month. Older major eras may be deprecated rather than maintained in parallel.
+
+Pi Web declares `@earendil-works/pi-coding-agent` as a peer dependency (`>=0.74.0 <1`) and a development dependency for local builds. This keeps published installs flexible: npm 7+ installs the peer automatically, and users can upgrade the Pi package within the compatible range without Pi Web pinning a separate copy.
+
+
 The web server defaults to `127.0.0.1:8504`. Set `PI_WEB_HOST=0.0.0.0` only when you intentionally want to bind directly on all interfaces.
 
 The session daemon defaults to a private Unix socket at:

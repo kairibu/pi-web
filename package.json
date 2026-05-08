@@ -1,6 +1,6 @@
 {
   "name": "pi-web",
-  "version": "0.0.1",
+  "version": "1.202605.1",
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -26,7 +26,12 @@
     "test": "vitest run --config vitest.config.ts",
     "verify": "npm run typecheck && npm run lint && npm test",
     "start": "tsx src/server/index.ts",
-    "start:sessiond": "tsx src/server/sessiond.ts"
+    "start:sessiond": "tsx src/server/sessiond.ts",
+    "clean": "rm -rf dist",
+    "prepack": "npm run build",
+    "pack:dry": "npm pack --dry-run",
+    "prepublishOnly": "npm run verify",
+    "publish:npm": "npm publish --access public"
   },
   "dependencies": {
     "@codemirror/lang-css": "^6.3.1",
@@ -38,7 +43,6 @@
     "@codemirror/lang-python": "^6.2.1",
     "@codemirror/lang-rust": "^6.0.2",
     "@codemirror/legacy-modes": "^6.5.2",
-    "@earendil-works/pi-coding-agent": "^0.74.0",
     "@fastify/static": "^8.3.0",
     "@fastify/websocket": "^11.2.0",
     "@xterm/addon-fit": "^0.11.0",
@@ -51,6 +55,7 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.74.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.10.1",
     "@types/ws": "^8.18.1",
@@ -61,5 +66,23 @@
     "typescript-eslint": "^8.59.2",
     "vite": "^7.2.4",
     "vitest": "^4.1.5"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jmfederico/pi-web.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jmfederico/pi-web/issues"
+  },
+  "homepage": "https://github.com/jmfederico/pi-web#readme",
+  "packageManager": "npm@11.11.0",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.74.0 <1"
   }
 }
