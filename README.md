@@ -2,7 +2,9 @@
 
 ![Pi Web](docs/assets/pi-web-banner.png)
 
-<video src="docs/assets/pi-web-demo.webm" autoplay muted loop playsinline controls></video>
+![Pi Web demo](docs/assets/pi-web-demo.gif)
+
+[Watch the WebM demo](docs/assets/pi-web-demo.webm)
 
 **Run AI coding agents on your own machine or server, keep them alive in real workspaces, and control everything from a browser.**
 
