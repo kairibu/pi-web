@@ -42,6 +42,7 @@ export function appendThinking(messages: ChatLine[], text: string): ChatLine[] {
 }
 
 export function normalizeMessage(message: unknown): ChatLine[] {
+  if (isChatLine(message)) return [message];
   if (getString(message, "role") === "bashExecution") return [withMessageMeta(normalizeBashExecution(message), message)];
   const role = normalizeRole(getString(message, "role"));
   const parts = normalizeContent(getProperty(message, "content"), message);
@@ -53,6 +54,12 @@ export function normalizeMessage(message: unknown): ChatLine[] {
   const visible = parts.filter((part) => part.type !== "empty");
   const displayRole = role === "assistant" && visible.length > 0 && visible.every((part) => part.type === "skillRead") ? "skill" : role;
   return visible.length > 0 ? [withMessageMeta({ role: displayRole, parts: visible, ...(source === undefined ? {} : { source }) }, message)] : [];
+}
+
+function isChatLine(message: unknown): message is ChatLine {
+  const role = getString(message, "role");
+  return (role === "user" || role === "assistant" || role === "tool" || role === "system" || role === "bash" || role === "skill")
+    && Array.isArray(getProperty(message, "parts"));
 }
 
 function normalizeSkillInvocation(parts: ChatPart[]): ChatLine[] | undefined {

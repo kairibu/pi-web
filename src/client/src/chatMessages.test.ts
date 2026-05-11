@@ -13,6 +13,13 @@ describe("chat message normalization", () => {
     ]);
   });
 
+  it("preserves already-normalized chat lines", () => {
+    const line = { role: "assistant" as const, parts: [{ type: "text" as const, text: "cached" }] };
+
+    expect(normalizeMessage(line)).toEqual([line]);
+    expect(normalizeMessages([{ role: "user", content: "raw" }, line])).toEqual([textMessage("user", "raw"), line]);
+  });
+
   it("normalizes tool calls and tool results", () => {
     expect(normalizeMessage({ role: "assistant", content: [{ type: "toolCall", name: "bash", arguments: { command: "npm test" } }] })).toEqual([
       { role: "assistant", parts: [{ type: "toolCall", toolName: "bash", summary: "npm test" }] },
