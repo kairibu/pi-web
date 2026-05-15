@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pi Web FAQ</title>
+    <meta name="description" content="Answers for common Pi Web install and runtime issues." />
+    <meta property="og:title" content="Pi Web FAQ" />
+    <meta property="og:image" content="assets/pi-web-banner.png" />
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="container nav" aria-label="Main navigation">
+        <a class="brand" href="./" aria-label="Pi Web home">Pi Web</a>
+        <div class="nav-links">
+          <a href="./">Home</a>
+          <a href="install.html">Install</a>
+          <a href="faq.html" aria-current="page">FAQ</a>
+          <a href="https://github.com/jmfederico/pi-web">GitHub</a>
+        </div>
+      </nav>
+    </header>
+
+    <main>
+      <section class="page-hero">
+        <div class="container">
+          <p class="eyebrow"><span class="pulse"></span> FAQ & troubleshooting</p>
+          <h1>Fix the things that usually go wrong first.</h1>
+          <p>
+            Most Pi Web install issues are environment issues: systemd availability, PATH setup, Node version managers,
+            or remote access expectations.
+          </p>
+        </div>
+      </section>
+
+      <section class="section compact">
+        <div class="container doc-layout">
+          <aside class="toc" aria-label="FAQ contents">
+            <strong>Questions</strong>
+            <a href="#is-this-linux-only">Is this Linux only?</a>
+            <a href="#tools-are-not-found">Tools are failing / node not found</a>
+            <a href="#doctor-fails">What does doctor check?</a>
+            <a href="#nvm-fnm-asdf">nvm, fnm, or asdf issues</a>
+            <a href="#systemd-not-found">systemctl is not available</a>
+            <a href="#cannot-open">I cannot open the web UI</a>
+            <a href="#public-internet">Can I expose this publicly?</a>
+            <a href="#sessions-stop">Sessions stop unexpectedly</a>
+            <a href="#logs">Where are logs?</a>
+          </aside>
+
+          <div class="faq-list">
+            <article id="is-this-linux-only" class="faq-item">
+              <h2>Is this Linux only?</h2>
+              <p>
+                No. Pi Web can run anywhere its runtime dependencies work, including macOS and Windows through WSL. The
+                automatic <code>pi-web install</code> command is the Linux-specific part because it writes and manages
+                <code>systemctl --user</code> services.
+              </p>
+              <ul>
+                <li><strong>Linux with systemd:</strong> use <code>npm install -g @jmfederico/pi-web</code> and <code>pi-web install</code>.</li>
+                <li><strong>macOS:</strong> install the package, then run <code>pi-web-sessiond</code> and <code>pi-web-server</code> manually.</li>
+                <li><strong>Windows:</strong> use WSL. If your WSL distro has systemd enabled, the installer may work; otherwise use the manual run path.</li>
+              </ul>
+              <p>Native Windows outside WSL is not the recommended path today.</p>
+            </article>
+
+            <article id="tools-are-not-found" class="faq-item">
+              <h2>Tools are failing, node is not found, or Pi cannot find commands</h2>
+              <p>
+                The shell environment needs to be set up so login shells have the required PATH entries for Pi Web, Pi,
+                and any tools your agents need. Pi Web services run commands through a non-interactive login shell, so
+                an interactive terminal can work while services fail.
+              </p>
+              <div class="code-card">
+                <div class="copy-row">
+                  <strong>Run diagnostics</strong>
+                  <button class="copy-button" data-copy="#doctor-command">Copy</button>
+                </div>
+                <pre id="doctor-command"><code><span class="prompt">$</span> pi-web doctor</code></pre>
+              </div>
+              <ul>
+                <li><strong>bash:</strong> put PATH setup in <code>~/.bash_profile</code> or <code>~/.profile</code>. If <code>~/.bash_profile</code> exists, source <code>~/.profile</code> from it if needed.</li>
+                <li><strong>zsh:</strong> put PATH setup in <code>~/.zprofile</code>, not only <code>~/.zshrc</code>.</li>
+                <li><strong>fish:</strong> prefer universal PATH setup, for example <code>fish_add_path -U ...</code>.</li>
+              </ul>
+              <p>Avoid relying only on prompt hooks or interactive-only shell files for tools needed by services.</p>
+            </article>
+
+            <article id="doctor-fails" class="faq-item">
+              <h2>What does <code>pi-web doctor</code> check?</h2>
+              <p>
+                It checks whether the service shell and systemd user environment can find Node 22+, npm, Pi, and the Pi
+                Web binaries. It also reports whether user service lingering is enabled for server-style installs.
+              </p>
+              <p>
+                If something works in your terminal but fails in doctor, treat that as a login-shell PATH mismatch and
+                move the setup earlier in your shell startup chain.
+              </p>
+            </article>
+
+            <article id="nvm-fnm-asdf" class="faq-item">
+              <h2>I installed Node with nvm, fnm, asdf, or another version manager</h2>
+              <p>
+                Version managers often initialize in interactive shells only. Pi Web needs Node and npm to be available to
+                login shells and systemd user services.
+              </p>
+              <ul>
+                <li>Move the version manager initialization to your login shell file.</li>
+                <li>Make sure <code>node --version</code> is at least <code>v22</code> from <code>bash -lc</code>, <code>zsh -lc</code>, or your detected shell.</li>
+                <li>Run <code>pi-web doctor</code> again after changing shell files.</li>
+              </ul>
+            </article>
+
+            <article id="systemd-not-found" class="faq-item">
+              <h2><code>systemctl --user</code> is not available</h2>
+              <p>
+                The automatic installer needs Linux user systemd. On macOS, WSL without systemd, containers without a
+                user systemd manager, or minimal Linux environments, run the two processes manually:
+              </p>
+              <div class="code-card">
+                <div class="copy-row">
+                  <strong>Manual run</strong>
+                  <button class="copy-button" data-copy="#manual-faq">Copy</button>
+                </div>
+                <pre id="manual-faq"><code><span class="prompt">$</span> pi-web-sessiond
+<span class="comment"># in another terminal</span>
+<span class="prompt">$</span> PI_WEB_PORT=8504 pi-web-server</code></pre>
+              </div>
+            </article>
+
+            <article id="cannot-open" class="faq-item">
+              <h2>I cannot open the web UI</h2>
+              <ul>
+                <li>Check <code>pi-web status</code>.</li>
+                <li>Check logs with <code>pi-web logs</code>.</li>
+                <li>Make sure port <code>8504</code> is not already in use.</li>
+                <li>On a remote server, use an SSH tunnel: <code>ssh -L 8504:127.0.0.1:8504 user@server</code>.</li>
+              </ul>
+            </article>
+
+            <article id="public-internet" class="faq-item">
+              <h2>Can I expose Pi Web to the public internet?</h2>
+              <p>
+                Do not expose it directly. Pi Web assumes trusted users and trusted server paths. Keep the default
+                localhost bind and use SSH tunneling, a VPN, or a reverse proxy with authentication and network policy.
+              </p>
+            </article>
+
+            <article id="sessions-stop" class="faq-item">
+              <h2>Sessions stop unexpectedly</h2>
+              <p>
+                Active agent runtimes are owned by the session daemon. Browser disconnects and web/API restarts should
+                not stop them. If they stop anyway, check whether the session daemon service restarted or crashed.
+              </p>
+              <div class="code-card">
+                <div class="copy-row">
+                  <strong>Session daemon logs</strong>
+                  <button class="copy-button" data-copy="#session-logs">Copy</button>
+                </div>
+                <pre id="session-logs"><code><span class="prompt">$</span> systemctl --user status pi-web-sessiond.service
+<span class="prompt">$</span> journalctl --user -u pi-web-sessiond.service -f</code></pre>
+              </div>
+            </article>
+
+            <article id="logs" class="faq-item">
+              <h2>Where are logs?</h2>
+              <p>For the Linux systemd install, use:</p>
+              <div class="code-card">
+                <div class="copy-row">
+                  <strong>Logs</strong>
+                  <button class="copy-button" data-copy="#logs-command">Copy</button>
+                </div>
+                <pre id="logs-command"><code><span class="prompt">$</span> pi-web logs
+<span class="prompt">$</span> journalctl --user -u pi-web-sessiond.service -u pi-web.service -f</code></pre>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-inner">
+        <span>Pi Web FAQ</span>
+        <div class="footer-links">
+          <a href="./">Home</a>
+          <a href="install.html">Install</a>
+          <a href="https://github.com/jmfederico/pi-web/issues">Issues</a>
+        </div>
+      </div>
+    </footer>
+    <script src="site.js"></script>
+  </body>
+</html>

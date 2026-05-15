@@ -91,7 +91,7 @@
   "bugs": {
     "url": "https://github.com/jmfederico/pi-web/issues"
   },
-  "homepage": "https://github.com/jmfederico/pi-web#readme",
+  "homepage": "https://jmfederico.github.io/pi-web/",
   "packageManager": "npm@11.11.0",
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.74.0 <1",

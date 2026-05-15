@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Install Pi Web</title>
+    <meta name="description" content="Complete installation guide for Pi Web on Linux, macOS, and Windows WSL." />
+    <meta property="og:title" content="Install Pi Web" />
+    <meta property="og:image" content="assets/pi-web-banner.png" />
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="container nav" aria-label="Main navigation">
+        <a class="brand" href="./" aria-label="Pi Web home">Pi Web</a>
+        <div class="nav-links">
+          <a href="./">Home</a>
+          <a href="install.html" aria-current="page">Install</a>
+          <a href="faq.html">FAQ</a>
+          <a href="https://github.com/jmfederico/pi-web">GitHub</a>
+        </div>
+      </nav>
+    </header>
+
+    <main>
+      <section class="page-hero">
+        <div class="container">
+          <p class="eyebrow"><span class="pulse"></span> Installation guide</p>
+          <h1>Get Pi Web running where your agents work.</h1>
+          <p>
+            The best production-style setup is a Linux machine with user-level systemd services. macOS and Windows WSL
+            are useful too: run the two Pi Web processes manually, or use the installer in WSL when systemd is enabled.
+          </p>
+        </div>
+      </section>
+
+      <section class="section compact">
+        <div class="container doc-layout">
+          <aside class="toc" aria-label="Install page contents">
+            <strong>On this page</strong>
+            <a href="#requirements">Requirements</a>
+            <a href="#linux-systemd">Linux systemd install</a>
+            <a href="#one-line">One-line install</a>
+            <a href="#pi-package">Install through Pi</a>
+            <a href="#manual-run">macOS / WSL manual run</a>
+            <a href="#remote-access">Remote access</a>
+            <a href="#manage-services">Manage services</a>
+            <a href="#configure">Configure</a>
+            <a href="#uninstall">Uninstall</a>
+          </aside>
+
+          <div class="doc-content">
+            <section id="requirements">
+              <h2>Requirements</h2>
+              <ul>
+                <li><strong>Node.js 22 or newer</strong> and npm.</li>
+                <li><strong>Pi Coding Agent</strong> installed/configured so the <code>pi</code> command works for your user.</li>
+                <li>A shell login environment that exposes Node, npm, Pi, git, and any tools your agents need.</li>
+                <li>For the automatic installer: Linux with <code>systemctl --user</code>.</li>
+              </ul>
+              <div class="callout warning">
+                <strong>Important PATH detail:</strong>
+                Pi Web services run through your login shell with <code>-lc</code>. Setup that only lives in interactive shell
+                files or prompt hooks may not be visible to services. Run <code>pi-web doctor</code> after installing.
+              </div>
+            </section>
+
+            <section id="linux-systemd">
+              <h2>Recommended: Linux systemd install</h2>
+              <p>
+                This creates two user services: one long-lived session daemon and one web/API service. It is the easiest
+                way to keep sessions available after SSH disconnects or browser restarts.
+              </p>
+              <div class="code-card">
+                <div class="copy-row">
+                  <strong>Linux install</strong>
+                  <button class="copy-button" data-copy="#linux-install">Copy</button>
+                </div>
+                <pre id="linux-install"><code><span class="prompt">$</span> npm install -g @jmfederico/pi-web
+<span class="comment"># Recommended on servers so user services survive logout/reboot:</span>
+<span class="prompt">$</span> sudo loginctl enable-linger "$USER"
+<span class="prompt">$</span> pi-web install
+<span class="prompt">$</span> pi-web doctor</code></pre>
+              </div>
+              <p>Then open <a href="http://127.0.0.1:8504">http://127.0.0.1:8504</a>.</p>
+            </section>
+
+            <section id="one-line">
+              <h2>One-line install</h2>
+              <p>If you prefer a curl pipe, use the repository installer:</p>
+              <div class="code-card">
+                <div class="copy-row">
+                  <strong>One-liner</strong>
+                  <button class="copy-button" data-copy="#one-line-install">Copy</button>
+                </div>
+                <pre id="one-line-install"><code><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/jmfederico/pi-web/main/install.sh | sh</code></pre>
+              </div>
+            </section>
+
+            <section id="pi-package">
+              <h2>Install through Pi</h2>
+              <p>Pi Web is also published as a Pi package. This exposes a <code>/pi-web</code> command inside Pi.</p>
+              <div class="code-card">
+                <div class="copy-row">
+                  <strong>Pi package path</strong>
+                  <button class="copy-button" data-copy="#pi-package-install">Copy</button>
+                </div>
+                <pre id="pi-package-install"><code><span class="prompt">$</span> pi install npm:@jmfederico/pi-web
+
+<span class="comment"># Then inside Pi:</span>
+/pi-web install
+/pi-web status
+/pi-web logs
+/pi-web doctor</code></pre>
+              </div>
+            </section>
+
+            <section id="manual-run">
+              <h2>macOS / WSL manual run</h2>
+              <p>
+                Pi Web is not Linux-only, but the <code>pi-web install</code> service setup is Linux/systemd-specific. On macOS
+                or WSL without systemd, install the package and run the daemon and web server yourself.
+              </p>
+              <div class="code-card">
+                <div class="copy-row">
+                  <strong>Manual processes</strong>
+                  <button class="copy-button" data-copy="#manual-install">Copy</button>
+                </div>
+                <pre id="manual-install"><code><span class="prompt">$</span> npm install -g @jmfederico/pi-web
+
+<span class="comment"># Terminal 1</span>
+<span class="prompt">$</span> pi-web-sessiond
+
+<span class="comment"># Terminal 2</span>
+<span class="prompt">$</span> PI_WEB_PORT=8504 pi-web-server</code></pre>
+              </div>
+              <p>
+                On modern WSL distributions with systemd enabled, the Linux installer can work. Without systemd, use the
+                manual run approach above.
+              </p>
+            </section>
+
+            <section id="remote-access">
+              <h2>Remote access</h2>
+              <p>
+                Pi Web binds to <code>127.0.0.1:8504</code> by default. For a remote server, keep that safe default and use an
+                SSH tunnel:
+              </p>
+              <div class="code-card">
+                <div class="copy-row">
+                  <strong>SSH tunnel</strong>
+                  <button class="copy-button" data-copy="#ssh-tunnel">Copy</button>
+                </div>
+                <pre id="ssh-tunnel"><code><span class="prompt">$</span> ssh -L 8504:127.0.0.1:8504 user@your-server
+<span class="comment"># Open http://127.0.0.1:8504 on your local machine</span></code></pre>
+              </div>
+              <div class="callout danger">
+                Pi Web is designed for trusted users and trusted server paths. Do not expose it directly to the public
+                internet without adding your own network controls, authentication, or reverse proxy policy.
+              </div>
+            </section>
+
+            <section id="manage-services">
+              <h2>Manage services</h2>
+              <div class="code-card">
+                <div class="copy-row">
+                  <strong>Useful commands</strong>
+                  <button class="copy-button" data-copy="#manage-commands">Copy</button>
+                </div>
+                <pre id="manage-commands"><code><span class="prompt">$</span> pi-web status
+<span class="prompt">$</span> pi-web logs
+<span class="prompt">$</span> pi-web restart
+<span class="prompt">$</span> pi-web doctor
+<span class="prompt">$</span> systemctl --user status pi-web-sessiond.service pi-web.service
+<span class="prompt">$</span> journalctl --user -u pi-web-sessiond.service -u pi-web.service -f</code></pre>
+              </div>
+            </section>
+
+            <section id="configure">
+              <h2>Configure</h2>
+              <p>
+                The installer writes a config file under your user config directory. The web server defaults to
+                <code>127.0.0.1:8504</code> and stores Pi Web state in <code>~/.pi-web</code>.
+              </p>
+              <ul>
+                <li><code>PI_WEB_PORT</code> or <code>PORT</code>: web server port.</li>
+                <li><code>PI_WEB_HOST</code>: web server bind host. Keep <code>127.0.0.1</code> unless you know why not.</li>
+                <li><code>PI_WEB_DATA_DIR</code>: data directory, default <code>~/.pi-web</code>.</li>
+                <li><code>PI_WEB_SESSIOND_SOCKET</code>: Unix socket path for daemon communication.</li>
+              </ul>
+            </section>
+
+            <section id="uninstall">
+              <h2>Uninstall</h2>
+              <p>Remove the user services, then remove the npm package if you installed it globally.</p>
+              <div class="code-card">
+                <div class="copy-row">
+                  <strong>Uninstall</strong>
+                  <button class="copy-button" data-copy="#uninstall-commands">Copy</button>
+                </div>
+                <pre id="uninstall-commands"><code><span class="prompt">$</span> pi-web uninstall
+<span class="prompt">$</span> npm uninstall -g @jmfederico/pi-web</code></pre>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-inner">
+        <span>Pi Web docs</span>
+        <div class="footer-links">
+          <a href="./">Home</a>
+          <a href="faq.html">FAQ</a>
+          <a href="https://github.com/jmfederico/pi-web">GitHub</a>
+        </div>
+      </div>
+    </footer>
+    <script src="site.js"></script>
+  </body>
+</html>

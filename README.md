@@ -6,6 +6,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Pi Coding Agent](https://img.shields.io/badge/Pi-Coding%20Agent-6f42c1)](https://github.com/earendil-works/pi/tree/main/packages/coding-agent)
 
+Website: <https://jmfederico.github.io/pi-web/>
+
 ![Pi Web](docs/assets/pi-web-banner.png)
 
 **Run AI coding agents on your own machine or server, keep them alive in real workspaces, and control everything from a browser.**
@@ -174,6 +176,8 @@ npm run dev
 ```
 
 Open the Vite URL, usually <http://localhost:8505>.
+
+During development, the static marketing/docs site is also served by the Vite dev server at <http://localhost:8505/site/>.
 
 For the recommended split development setup, run these in separate terminals:
 
