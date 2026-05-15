@@ -746,6 +746,12 @@ code .comment,
 .faq-list {
   display: grid;
   gap: 18px;
+  min-width: 0;
+}
+
+.faq-item {
+  min-width: 0;
+  scroll-margin-top: 112px;
 }
 
 .faq-item ul,
@@ -987,11 +993,38 @@ html[data-theme="light"] .comment {
   .nav {
     align-items: flex-start;
     flex-direction: column;
+    gap: 12px;
     padding: 14px 0;
   }
 
   .nav-links {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    width: 100%;
+    scrollbar-width: none;
+  }
+
+  .nav-links::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-links a,
+  .theme-toggle {
+    min-height: 38px;
+    padding: 0 10px;
+  }
+
+  .nav-links .github-link,
+  .theme-toggle {
+    justify-content: center;
+    width: 38px;
+    min-width: 38px;
+    padding: 0;
+  }
+
+  .nav-links .github-link span,
+  .theme-toggle [data-theme-label] {
+    display: none;
   }
 
   .hero {
