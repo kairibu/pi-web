@@ -1,5 +1,17 @@
 # @jmfederico/pi-web
 
+## 1.202605.7
+
+### Patch Changes
+
+- aab9ffb: Preserve newly started empty sessions and their prompt drafts across browser reloads until the user deletes them.
+- c5bc855: Improve `pi-web doctor` and `pi-web install` to use the detected bash, zsh, or fish login shell, verify the systemd user service context can find required commands before installation, and print shell-specific PATH setup advice without persisting transient PATH values.
+- 9b1b1bb: Fix the docs mobile navigation so FAQ pages no longer overflow and compact the GitHub/theme controls on small screens.
+- 0aa0a13: Fix chat history reloads so previously displayed messages are not duplicated from the browser cache.
+- 42cad58: Add remote-first development positioning to the website and docs, including a philosophy page and laptop-versus-server FAQ guidance.
+- c66d834: Add a static Pi Web website with installation docs, troubleshooting FAQ, and GitHub Pages deployment.
+- 6a8f8b6: Add global web UI `/login` and `/logout` flows for configuring API key and subscription provider authentication.
+
 ## 1.202605.6
 
 ### Patch Changes
