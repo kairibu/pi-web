@@ -568,6 +568,12 @@ code .comment,
   font-size: 1.3rem;
 }
 
+.card-icon svg {
+  display: block;
+  width: 24px;
+  height: 24px;
+}
+
 .card h3,
 .doc-card h3,
 .faq-item h2,
