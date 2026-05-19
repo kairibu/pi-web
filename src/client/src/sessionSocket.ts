@@ -186,7 +186,7 @@ function isGlobalSessionEvent(event: unknown): event is GlobalSessionEvent {
 
 function isRealtimeEvent(event: unknown): event is RealtimeEvent {
   const type = eventType(event);
-  return isGlobalSessionEvent(event) || type === "terminal.created" || type === "terminal.exited" || type === "terminal.closed";
+  return isGlobalSessionEvent(event) || type === "terminal.created" || type === "terminal.exited" || type === "terminal.closed" || type === "workspace.activity";
 }
 
 function eventType(event: unknown): string {

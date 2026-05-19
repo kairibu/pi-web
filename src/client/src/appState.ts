@@ -1,4 +1,4 @@
-import type { AuthProviderOption, CommandOption, CommandResult, FileContentResponse, FileTreeEntry, GitDiffResponse, GitStatusResponse, OAuthFlowState, PiWebStatusResponse, Project, SessionActivity, SessionInfo, SessionStatus, Workspace } from "./api";
+import type { AuthProviderOption, CommandOption, CommandResult, FileContentResponse, FileTreeEntry, GitDiffResponse, GitStatusResponse, OAuthFlowState, PiWebStatusResponse, Project, SessionActivity, SessionInfo, SessionStatus, Workspace, WorkspaceActivity } from "./api";
 import type { ChatLine } from "./components/shared";
 import type { QualifiedContributionId } from "./plugins/types";
 
@@ -18,6 +18,8 @@ export interface AppState {
   activity: SessionActivity | undefined;
   sessionStatuses: Record<string, SessionStatus>;
   sessionActivities: Record<string, SessionActivity>;
+  workspaceActivities: Record<string, WorkspaceActivity>;
+  workspacesByProjectId: Record<string, Workspace[]>;
   commandDialog: Extract<CommandResult, { type: "select" }> | undefined;
   modelDialog: { title: string; options: CommandOption[]; selectedValue?: string } | undefined;
   thinkingDialog: { title: string; options: CommandOption[]; selectedValue?: string } | undefined;
@@ -66,6 +68,8 @@ export function initialAppState(): AppState {
     activity: undefined,
     sessionStatuses: {},
     sessionActivities: {},
+    workspaceActivities: {},
+    workspacesByProjectId: {},
     commandDialog: undefined,
     modelDialog: undefined,
     thinkingDialog: undefined,

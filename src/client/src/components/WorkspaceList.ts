@@ -1,7 +1,9 @@
 import { LitElement, html, type PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import type { Workspace } from "../api";
+import type { Workspace, WorkspaceActivity } from "../api";
 import type { WorkspaceLabelItem } from "../plugins/types";
+import { workspaceActivityFor, workspaceActivityIndicator } from "../workspaceActivity";
+import { renderActivityIndicator } from "./activityBadge";
 import { activateSelectableRow, activateSelectableRowFromKeyboard } from "./selectableRow";
 import { listStyles } from "./shared";
 import { renderWorkspaceLabelItems } from "./workspaceLabel";
@@ -13,6 +15,7 @@ export class WorkspaceList extends LitElement {
   @property({ type: Boolean, reflect: true }) collapsible = false;
   @property({ type: Boolean, reflect: true }) collapsed = false;
   @property({ attribute: false }) workspaceLabelItems: (workspace: Workspace) => WorkspaceLabelItem[] = () => [];
+  @property({ attribute: false }) activities: Record<string, WorkspaceActivity> = {};
   @property({ attribute: false }) onSelect?: (workspace: Workspace) => void;
   @property({ attribute: false }) onToggleCollapsed?: () => void;
 
@@ -39,7 +42,7 @@ export class WorkspaceList extends LitElement {
                   <span class="workspace-label-base">${label}</span>
                   ${renderWorkspaceLabelItems(this.workspaceLabelItems(workspace))}
                 </span>
-                <small>${workspace.path}</small>
+                <small>${this.renderActivity(workspace)}${workspace.path}</small>
               </div>
             </div>
           `;
@@ -51,6 +54,11 @@ export class WorkspaceList extends LitElement {
   private renderHeading() {
     if (!this.collapsible) return "Workspaces";
     return html`<button class="section-toggle" aria-expanded=${String(!this.collapsed)} @click=${() => { this.onToggleCollapsed?.(); }}><span>${this.collapsed ? "▸" : "▾"} Workspaces</span><small>${this.workspaces.length}</small></button>`;
+  }
+
+  private renderActivity(workspace: Workspace) {
+    const kind = workspaceActivityIndicator(workspaceActivityFor(workspace, this.activities));
+    return renderActivityIndicator(kind, kind === "terminal" ? "Workspace terminal active" : "Workspace active") ?? "";
   }
 
   private scrollSelectedIntoView(): void {

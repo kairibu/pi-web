@@ -2,6 +2,8 @@ import { LitElement, html, type PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { SessionActivity, SessionInfo, SessionStatus } from "../api";
 import { isCachedNewSessionInfo } from "../cachedNewSessions";
+import { isSessionActive } from "../../../shared/activity";
+import { renderActivityIndicator } from "./activityBadge";
 import { activateSelectableRow, activateSelectableRowFromKeyboard } from "./selectableRow";
 import { listStyles } from "./shared";
 
@@ -144,15 +146,7 @@ export class SessionList extends LitElement {
   private renderStatus(session: SessionInfo) {
     if (isCachedNewSessionInfo(session)) return "new · ";
     if (session.archived === true) return "read-only · ";
-    const status = this.statuses[session.id];
-    const activity = this.activities[session.id];
-    if (activity?.phase === "active") return `● ${activity.label} · `;
-    if (status === undefined) return "";
-    if (status.isStreaming) return "● streaming · ";
-    if (status.isBashRunning) return "● bash · ";
-    if (status.isCompacting) return "● compacting · ";
-    if (status.pendingMessageCount > 0) return `● ${String(status.pendingMessageCount)} pending · `;
-    return "";
+    return renderActivityIndicator(isSessionActive(this.statuses[session.id], this.activities[session.id]) ? "session" : undefined, "Session active") ?? "";
   }
 
   static override styles = listStyles;

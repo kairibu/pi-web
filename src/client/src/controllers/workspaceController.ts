@@ -21,6 +21,8 @@ export class WorkspaceController {
 
   forgetProject(projectId: string): void {
     this.workspaceSelection.forgetProject(projectId);
+    const workspacesByProjectId = Object.fromEntries(Object.entries(this.getState().workspacesByProjectId).filter(([candidate]) => candidate !== projectId));
+    this.setState({ workspacesByProjectId });
   }
 
   async selectProject(project: Project, target?: RouteTarget) {
@@ -28,7 +30,7 @@ export class WorkspaceController {
     this.setState({ selectedProject: project, selectedWorkspace: undefined, sessions: [], workspaces: [], fileTree: [], expandedDirs: {}, selectedFilePath: undefined, selectedFileContent: undefined, fileTreeStale: false, gitStatus: undefined, selectedDiffPath: undefined, selectedDiff: undefined, selectedStagedDiff: undefined, gitStale: false, error: "" });
     try {
       const workspaces = await api.workspaces(project.id);
-      this.setState({ workspaces });
+      this.setState({ workspaces, workspacesByProjectId: { ...this.getState().workspacesByProjectId, [project.id]: workspaces } });
       const workspace = selectPreferredWorkspace(workspaces, { targetWorkspaceId: target?.workspaceId, latestWorkspaceId: this.workspaceSelection.latestWorkspaceId(project.id) });
       if (workspace) await this.selectWorkspace(workspace, { sessionId: target?.sessionId, updateUrl: target?.updateUrl });
       else if (target?.updateUrl !== false) this.updateUrl();

@@ -8,7 +8,10 @@ export class ProjectController {
   async loadProjects() {
     this.setState({ error: "" });
     try {
-      this.setState({ projects: await api.projects() });
+      const projects = await api.projects();
+      const projectIds = new Set(projects.map((project) => project.id));
+      const workspacesByProjectId = Object.fromEntries(Object.entries(this.getState().workspacesByProjectId).filter(([projectId]) => projectIds.has(projectId)));
+      this.setState({ projects, workspacesByProjectId });
     } catch (error) {
       this.setState({ error: String(error) });
     }

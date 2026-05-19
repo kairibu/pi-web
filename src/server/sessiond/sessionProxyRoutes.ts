@@ -30,6 +30,7 @@ export function registerSessionProxyRoutes(app: FastifyInstance, daemon = new Se
     bridgeSockets(socket, daemon.connectWebSocket("/events"));
   });
 
+  app.all("/api/activity", (request, reply) => proxy(request, reply));
   app.all("/api/auth", (request, reply) => proxy(request, reply));
   app.all("/api/auth/*", (request, reply) => proxy(request, reply));
   app.all("/api/sessions", (request, reply) => proxy(request, reply));

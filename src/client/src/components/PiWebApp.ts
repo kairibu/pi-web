@@ -3,6 +3,8 @@ import { customElement, query, state } from "lit/decorators.js";
 import { piWebApi, terminalsApi, type Project, type RealtimeEvent, type SessionInfo, type TerminalUiEvent, type ThinkingLevel, type Workspace } from "../api";
 import type { AppAction } from "../actions";
 import { initialAppState, type AppState } from "../appState";
+import { isSessionActive } from "../../../shared/activity";
+import { ActivityController } from "../controllers/activityController";
 import { AuthController } from "../controllers/authController";
 import { FileExplorerController } from "../controllers/fileExplorerController";
 import { GitController } from "../controllers/gitController";
@@ -50,6 +52,10 @@ export class PiWebApp extends LitElement {
     (patch) => { this.setState(patch); },
     () => { this.updateUrl(); },
   );
+  private readonly activity = new ActivityController(
+    () => this.state,
+    (patch) => { this.setState(patch); },
+  );
   private readonly auth = new AuthController(
     () => this.state,
     (patch) => { this.setState(patch); },
@@ -95,11 +101,13 @@ export class PiWebApp extends LitElement {
   private readonly onFocus = () => {
     void this.sessions.refreshSelectedSession();
     void this.refreshPiWebStatus();
+    void this.refreshWorkspaceActivity();
   };
   private readonly onVisibilityChange = () => {
     if (document.visibilityState === "visible") {
       void this.sessions.refreshSelectedSession();
       void this.refreshPiWebStatus();
+      void this.refreshWorkspaceActivity();
     }
   };
   private readonly onMobileNavigationMediaChange = (event: MediaQueryListEvent) => {
@@ -127,6 +135,7 @@ export class PiWebApp extends LitElement {
     this.connectRealtime();
     this.piWebStatusTimer = window.setInterval(() => { void this.refreshPiWebStatus(); }, PI_WEB_STATUS_REFRESH_MS);
     void this.refreshPiWebStatus();
+    void this.refreshWorkspaceActivity();
     void this.loadExternalPlugins();
     void this.loadProjectsAndRestoreRoute();
   }
@@ -178,6 +187,14 @@ export class PiWebApp extends LitElement {
       this.setState({ piWebStatus: await piWebApi.piWebStatus() });
     } catch (error) {
       console.warn("Failed to refresh Pi Web status", error);
+    }
+  }
+
+  private async refreshWorkspaceActivity(): Promise<void> {
+    try {
+      await this.activity.refresh();
+    } catch (error) {
+      console.warn("Failed to refresh workspace activity", error);
     }
   }
 
@@ -262,12 +279,14 @@ export class PiWebApp extends LitElement {
       () => {
         const workspace = this.state.selectedWorkspace;
         if (workspace !== undefined) void this.refreshActiveTerminals(workspace);
+        void this.refreshWorkspaceActivity();
       },
     );
   }
 
   private handleRealtimeEvent(event: RealtimeEvent): void {
-    if (isTerminalEvent(event)) this.applyTerminalEvent(event);
+    if (event.type === "workspace.activity") this.activity.applyWorkspaceActivity(event.activity);
+    else if (isTerminalEvent(event)) this.applyTerminalEvent(event);
     else this.sessions.applyGlobalEvent(event);
   }
 
@@ -296,8 +315,8 @@ export class PiWebApp extends LitElement {
   }
 
   private handleActivityTransition(previous: AppState, next: AppState) {
-    const wasActive = isActive(previous.status);
-    const nowActive = isActive(next.status);
+    const wasActive = isActive(previous);
+    const nowActive = isActive(next);
     if (wasActive && !nowActive) {
       this.setState({ fileTreeStale: true, gitStale: true });
       this.refreshSelectedWorkspaceTool(this.state.workspaceTool);
@@ -328,6 +347,8 @@ export class PiWebApp extends LitElement {
       <project-list
         .projects=${this.state.projects}
         .selected=${this.state.selectedProject}
+        .activities=${this.state.workspaceActivities}
+        .workspacesByProjectId=${this.state.workspacesByProjectId}
         .collapsible=${this.isMobileNavigationLayout}
         .collapsed=${this.isNavigationSectionCollapsed("projects")}
         .onToggleCollapsed=${() => { this.toggleNavigationSection("projects"); }}
@@ -340,6 +361,7 @@ export class PiWebApp extends LitElement {
       <workspace-list
         .workspaces=${this.state.workspaces}
         .selected=${this.state.selectedWorkspace}
+        .activities=${this.state.workspaceActivities}
         .collapsible=${this.isMobileNavigationLayout}
         .collapsed=${this.isNavigationSectionCollapsed("workspaces")}
         .workspaceLabelItems=${(workspace: Workspace) => this.plugins.getWorkspaceLabelItems(this.state, workspace)}
@@ -624,8 +646,8 @@ function patchChangesState(state: AppState, patch: Partial<AppState>): boolean {
   return Object.entries(patch).some(([key, value]) => Reflect.get(state, key) !== value);
 }
 
-function isActive(status: AppState["status"]): boolean {
-  return status?.isStreaming === true || status?.isBashRunning === true || status?.isCompacting === true;
+function isActive(state: Pick<AppState, "status" | "activity">): boolean {
+  return isSessionActive(state.status, state.activity);
 }
 
 function isTerminalEvent(event: RealtimeEvent): event is TerminalUiEvent {

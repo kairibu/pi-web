@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import * as pty from "node-pty";
 import type { TerminalUiEvent } from "../../shared/apiTypes.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
+import type { WorkspaceActivityService } from "../activity/workspaceActivityService.js";
 
 const MAX_REPLAY_BUFFER = 200_000;
 
@@ -24,7 +25,7 @@ interface TerminalRecord extends TerminalInfo {
 export class TerminalService {
   private readonly terminals = new Map<string, TerminalRecord>();
 
-  constructor(private readonly events?: SessionEventHub) {}
+  constructor(private readonly events?: SessionEventHub, private readonly workspaceActivity?: Pick<WorkspaceActivityService, "updateTerminal" | "removeTerminal">) {}
 
   list(cwd: string): TerminalInfo[] {
     return [...this.terminals.values()]
@@ -63,10 +64,13 @@ export class TerminalService {
       record.exited = true;
       record.exitCode = exitCode;
       record.events.emit("exit", exitCode);
-      this.publish({ type: "terminal.exited", terminal: toInfo(record) });
+      const info = toInfo(record);
+      this.workspaceActivity?.updateTerminal(info);
+      this.publish({ type: "terminal.exited", terminal: info });
     });
     this.terminals.set(id, record);
     const info = toInfo(record);
+    this.workspaceActivity?.updateTerminal(info);
     this.publish({ type: "terminal.created", terminal: info });
     return info;
   }
@@ -107,6 +111,7 @@ export class TerminalService {
     if (terminal === undefined) return;
     this.terminals.delete(id);
     terminal.events.removeAllListeners();
+    this.workspaceActivity?.removeTerminal(id, terminal.cwd);
     if (!terminal.exited) terminal.pty.kill();
     this.publish({ type: "terminal.closed", terminalId: id, cwd: terminal.cwd });
   }

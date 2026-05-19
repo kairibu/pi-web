@@ -1,4 +1,4 @@
-import type { AuthProviderOption, AuthProviderStatus, AuthProvidersResponse, AuthStatusSource, AuthType, CommandOption, CommandResult, FileContentResponse, FileSuggestion, FileTreeEntry, FileTreeResponse, GitDiffResponse, GitFileState, GitStatusFile, GitStatusResponse, MessagePage, ModelSelectionResponse, OAuthFlowState, PiWebComponentStatus, PiWebInstallationInfo, PiWebReleaseStatus, PiWebServiceComponent, PiWebStatusMessage, PiWebStatusResponse, PiWebStatusSeverity, Project, QueuedSessionMessage, SessionInfo, SessionModel, SessionStatus, SlashCommand, TerminalInfo, ThinkingLevel, ThinkingLevelsResponse, Workspace } from "../../../shared/apiTypes";
+import type { AuthProviderOption, AuthProviderStatus, AuthProvidersResponse, AuthStatusSource, AuthType, CommandOption, CommandResult, FileContentResponse, FileSuggestion, FileTreeEntry, FileTreeResponse, GitDiffResponse, GitFileState, GitStatusFile, GitStatusResponse, MessagePage, ModelSelectionResponse, OAuthFlowState, PiWebComponentStatus, PiWebInstallationInfo, PiWebReleaseStatus, PiWebServiceComponent, PiWebStatusMessage, PiWebStatusResponse, PiWebStatusSeverity, Project, QueuedSessionMessage, SessionInfo, SessionModel, SessionStatus, SlashCommand, TerminalInfo, ThinkingLevel, ThinkingLevelsResponse, Workspace, WorkspaceActivity, WorkspaceActivityResponse } from "../../../shared/apiTypes";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -296,6 +296,21 @@ export function parseGitDiffResponse(value: unknown): GitDiffResponse {
 export function parseTerminalInfo(value: unknown): TerminalInfo {
   const record = requireRecord(value);
   return { id: requireString(record, "id"), cwd: requireString(record, "cwd"), name: requireString(record, "name"), createdAt: requireString(record, "createdAt"), exited: requireBoolean(record, "exited"), ...optionalField("exitCode", optionalNumber(record, "exitCode")) };
+}
+
+export function parseWorkspaceActivity(value: unknown): WorkspaceActivity {
+  const record = requireRecord(value);
+  return {
+    cwd: requireString(record, "cwd"),
+    hasSessionActivity: requireBoolean(record, "hasSessionActivity"),
+    hasTerminalActivity: requireBoolean(record, "hasTerminalActivity"),
+    updatedAt: requireString(record, "updatedAt"),
+  };
+}
+
+export function parseWorkspaceActivityResponse(value: unknown): WorkspaceActivityResponse {
+  const record = requireRecord(value);
+  return { workspaces: arrayOf(parseWorkspaceActivity)(record["workspaces"]), generatedAt: requireString(record, "generatedAt") };
 }
 
 export function parsePiWebStatusResponse(value: unknown): PiWebStatusResponse {

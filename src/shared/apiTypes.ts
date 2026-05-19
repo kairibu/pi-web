@@ -107,6 +107,18 @@ export interface SessionStatus {
   contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
 }
 
+export interface WorkspaceActivity {
+  cwd: string;
+  hasSessionActivity: boolean;
+  hasTerminalActivity: boolean;
+  updatedAt: string;
+}
+
+export interface WorkspaceActivityResponse {
+  workspaces: WorkspaceActivity[];
+  generatedAt: string;
+}
+
 export interface SlashCommand {
   name: string;
   description?: string;
@@ -242,6 +254,11 @@ export type TerminalUiEvent =
   | { type: "terminal.exited"; terminal: TerminalInfo }
   | { type: "terminal.closed"; terminalId: string; cwd: string };
 
+export interface WorkspaceActivityUiEvent {
+  type: "workspace.activity";
+  activity: WorkspaceActivity;
+}
+
 export interface CommandOption {
   value: string;
   label: string;
@@ -280,4 +297,4 @@ export type SessionUiEvent =
   | { type: "pi.event"; eventType: string };
 
 export type GlobalSessionEvent = Extract<SessionUiEvent, { type: "status.update" | "activity.update" | "session.name" }>;
-export type RealtimeEvent = GlobalSessionEvent | TerminalUiEvent;
+export type RealtimeEvent = GlobalSessionEvent | TerminalUiEvent | WorkspaceActivityUiEvent;

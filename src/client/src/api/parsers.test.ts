@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCommandResult, parseFileContentResponse, parseFileSuggestion, parseGitStatusResponse, parseMessagePage, parseSessionStatus, parseSlashCommand } from "./parsers";
+import { parseCommandResult, parseFileContentResponse, parseFileSuggestion, parseGitStatusResponse, parseMessagePage, parseSessionStatus, parseSlashCommand, parseWorkspaceActivityResponse } from "./parsers";
 
 describe("API parsers", () => {
   it("accepts legacy array message pages and paged message responses", () => {
@@ -32,6 +32,16 @@ describe("API parsers", () => {
       model: { provider: "p", id: "m", contextWindow: 100, reasoning: { effort: "low" } },
       contextUsage: { tokens: null, contextWindow: 100, percent: 0.5 },
       thinkingLevel: "medium",
+    });
+  });
+
+  it("parses workspace activity snapshots", () => {
+    expect(parseWorkspaceActivityResponse({
+      generatedAt: "now",
+      workspaces: [{ cwd: "/repo", hasSessionActivity: true, hasTerminalActivity: false, updatedAt: "later" }],
+    })).toEqual({
+      generatedAt: "now",
+      workspaces: [{ cwd: "/repo", hasSessionActivity: true, hasTerminalActivity: false, updatedAt: "later" }],
     });
   });
 

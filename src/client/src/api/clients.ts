@@ -27,11 +27,16 @@ import {
   parseTerminalInfo,
   parseThinkingLevelsResponse,
   parseWorkspace,
+  parseWorkspaceActivityResponse,
 } from "./parsers";
 import { gitDiffUrl, messageUrl } from "./urls";
 
 export const piWebApi = {
   piWebStatus: () => request("/api/pi-web/status", parsePiWebStatusResponse),
+};
+
+export const activityApi = {
+  workspaceActivity: () => request("/api/activity", parseWorkspaceActivityResponse),
 };
 
 export const projectsApi = {
@@ -100,6 +105,7 @@ export const gitApi = {
 
 export const api = {
   ...piWebApi,
+  ...activityApi,
   ...projectsApi,
   ...workspacesApi,
   ...sessionsApi,

@@ -1,3 +1,4 @@
+import { isSessionActive } from "../../../../shared/activity";
 import type { AppState } from "../../appState";
 import type { PluginAction } from "../types";
 
@@ -114,7 +115,7 @@ export function createCoreActions(): PluginAction[] {
       title: "Stop Active Work",
       shortcut: "mod+.",
       group: "Session",
-      enabled: (context) => context.state.selectedSession !== undefined && isActive(context.state.status),
+      enabled: (context) => context.state.selectedSession !== undefined && isSessionActive(context.state.status, context.state.activity),
       run: (context) => context.stopActiveWork(),
     },
   ];
@@ -126,8 +127,4 @@ function hasWorkspace(context: { state: AppState }): boolean {
 
 function hasGitWorkspace(context: { state: AppState }): boolean {
   return context.state.selectedWorkspace?.isGitRepo === true;
-}
-
-function isActive(status: AppState["status"]): boolean {
-  return status?.isStreaming === true || status?.isBashRunning === true || status?.isCompacting === true;
 }

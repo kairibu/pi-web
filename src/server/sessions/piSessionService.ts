@@ -23,6 +23,7 @@ import type { ActiveSession } from "./sessionRuntimeStore.js";
 import type { AuthChange } from "./authService.js";
 import { fallbackSessionName, generateShortSessionName } from "./sessionNameGenerator.js";
 import { computeEditPreview, type EditPreviewResult } from "./editPreview.js";
+import type { WorkspaceActivityService } from "../activity/workspaceActivityService.js";
 
 function noop(): void {
   // Intentionally empty default unsubscribe callback.
@@ -163,6 +164,7 @@ export interface PiSessionServiceDependencies {
   createAgentRuntime?: CreateAgentRuntime;
   modelRegistry?: ModelRegistryInstance;
   heartbeatIntervalMs?: number;
+  workspaceActivity?: Pick<WorkspaceActivityService, "applySessionStatus" | "applySessionActivity" | "removeSession">;
 }
 
 export class PiSessionService {
@@ -177,6 +179,7 @@ export class PiSessionService {
   private readonly createRuntime: CreateAgentSessionRuntimeFactory;
   private readonly createAgentRuntime: CreateAgentRuntime;
   private readonly modelRegistry: ModelRegistryInstance;
+  private readonly workspaceActivity: Pick<WorkspaceActivityService, "applySessionStatus" | "applySessionActivity" | "removeSession"> | undefined;
 
   constructor(private readonly events: SessionEventHub, deps: PiSessionServiceDependencies = {}) {
     this.archiveStore = deps.archiveStore ?? new SessionArchiveStore();
@@ -185,6 +188,7 @@ export class PiSessionService {
     this.modelRegistry = deps.modelRegistry ?? ModelRegistry.create(AuthStorage.create());
     this.createRuntime = deps.createRuntime ?? createDefaultRuntimeFactory(this.modelRegistry.authStorage, this.modelRegistry);
     this.createAgentRuntime = deps.createAgentRuntime ?? defaultCreateAgentRuntime;
+    this.workspaceActivity = deps.workspaceActivity;
     this.heartbeat = setInterval(() => { this.publishHeartbeats(); }, deps.heartbeatIntervalMs ?? 2000);
     this.commandService = new SessionCommandService(
       (sessionId) => this.getActive(sessionId),
@@ -215,6 +219,7 @@ export class PiSessionService {
     this.authLossWarnings.clear();
     await Promise.all(activeSessions.map(async (active) => {
       active.unsubscribe();
+      this.workspaceActivity?.removeSession(active.runtime.session.sessionId);
       await active.runtime.session.abort();
       await active.runtime.dispose();
     }));
@@ -466,6 +471,7 @@ export class PiSessionService {
     if (!active) return;
     this.active.delete(sessionId);
     this.activities.delete(sessionId);
+    this.workspaceActivity?.removeSession(sessionId);
     this.clearAuthLossWarningsForSession(sessionId);
     clearSessionQueue(active.runtime.session);
     active.unsubscribe();
@@ -638,12 +644,14 @@ export class PiSessionService {
     const stored = detail === undefined ? { phase, label, at } : { phase, label, detail, at };
     this.activities.set(session.sessionId, stored);
     const activity = detail === undefined ? { sessionId: session.sessionId, phase, label, at } : { sessionId: session.sessionId, phase, label, detail, at };
+    this.workspaceActivity?.applySessionActivity(session.sessionManager.getCwd(), activity);
     this.events.publish(session.sessionId, { type: "activity.update", activity });
     this.events.publishGlobal({ type: "activity.update", activity });
   }
 
   private publishStatus(session: PiAgentSession): void {
     const status = this.statusFromSession(session);
+    this.workspaceActivity?.applySessionStatus(session.sessionManager.getCwd(), status);
     this.events.publish(session.sessionId, { type: "status.update", status });
     this.events.publishGlobal({ type: "status.update", status });
   }
