@@ -206,6 +206,40 @@ describe("PiSessionService", () => {
     await service.dispose();
   });
 
+  it("reconciles workspace activity when listing only archived sessions", async () => {
+    const reconciliations: { cwd: string; sessionIds: string[] }[] = [];
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      archiveStore: {
+        list: () => Promise.resolve([{ sessionId: "archived", cwd: "/workspace", archivedAt: "2026-01-02T00:00:00.000Z", originalPath: "/sessions/archived.jsonl", archivePath: "/archive/archived.jsonl", created: "2026-01-01T00:00:00.000Z", modified: "2026-01-01T00:01:00.000Z", messageCount: 2, firstMessage: "bye" }]),
+        get: () => Promise.resolve(undefined),
+        archive: () => { throw new Error("archive should not be called for moved records"); },
+        restore: () => Promise.resolve(),
+        isArchived: () => Promise.resolve(false),
+      },
+      sessionManager: {
+        create: () => fakeSessionManager(),
+        list: () => Promise.resolve([]),
+        listAll: () => Promise.resolve([]),
+        open: () => fakeSessionManager(),
+      },
+      workspaceActivity: {
+        applySessionStatus: () => undefined,
+        applySessionActivity: () => undefined,
+        removeSession: () => undefined,
+        reconcileSessionActivity: (cwd, sessionIds) => { reconciliations.push({ cwd, sessionIds: [...sessionIds] }); },
+      },
+      heartbeatIntervalMs: 60_000,
+    });
+
+    const sessions = await service.list("/workspace");
+
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({ id: "archived", archived: true });
+    expect(reconciliations).toEqual([{ cwd: "/workspace", sessionIds: [] }]);
+
+    await service.dispose();
+  });
+
   it("sends prompts to an injected runtime without touching the SDK runtime", async () => {
     const fake = fakeRuntime("prompt-session");
     const service = new PiSessionService(new CapturingSessionEventHub(), {

@@ -26,6 +26,7 @@ export class WorkspaceActivityService {
     const record = this.sessions.get(status.sessionId) ?? { cwd };
     record.cwd = cwd;
     record.status = status;
+    if (!isSessionActive(status) && record.activity?.phase === "active") delete record.activity;
     this.sessions.set(status.sessionId, record);
     this.pruneIdleSession(status.sessionId);
     this.publishChangedCwds(previousCwd, cwd);
@@ -41,10 +42,21 @@ export class WorkspaceActivityService {
     this.publishChangedCwds(previousCwd, cwd);
   }
 
-  removeSession(sessionId: string): void {
-    const cwd = this.sessions.get(sessionId)?.cwd;
+  removeSession(sessionId: string, cwd?: string): void {
+    const previousCwd = this.sessions.get(sessionId)?.cwd ?? cwd;
     this.sessions.delete(sessionId);
-    this.publishCwd(cwd);
+    this.publishCwd(previousCwd);
+  }
+
+  reconcileSessionActivity(cwd: string, sessionIds: Iterable<string>): void {
+    const knownSessionIds = new Set(sessionIds);
+    let changed = false;
+    for (const [sessionId, record] of this.sessions.entries()) {
+      if (record.cwd !== cwd || knownSessionIds.has(sessionId)) continue;
+      this.sessions.delete(sessionId);
+      changed = true;
+    }
+    if (changed) this.publishCwd(cwd);
   }
 
   updateTerminal(terminal: Pick<TerminalInfo, "id" | "cwd" | "exited">): void {

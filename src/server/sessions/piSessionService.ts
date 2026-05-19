@@ -164,7 +164,7 @@ export interface PiSessionServiceDependencies {
   createAgentRuntime?: CreateAgentRuntime;
   modelRegistry?: ModelRegistryInstance;
   heartbeatIntervalMs?: number;
-  workspaceActivity?: Pick<WorkspaceActivityService, "applySessionStatus" | "applySessionActivity" | "removeSession">;
+  workspaceActivity?: Pick<WorkspaceActivityService, "applySessionStatus" | "applySessionActivity" | "removeSession" | "reconcileSessionActivity">;
 }
 
 export class PiSessionService {
@@ -179,7 +179,7 @@ export class PiSessionService {
   private readonly createRuntime: CreateAgentSessionRuntimeFactory;
   private readonly createAgentRuntime: CreateAgentRuntime;
   private readonly modelRegistry: ModelRegistryInstance;
-  private readonly workspaceActivity: Pick<WorkspaceActivityService, "applySessionStatus" | "applySessionActivity" | "removeSession"> | undefined;
+  private readonly workspaceActivity: Pick<WorkspaceActivityService, "applySessionStatus" | "applySessionActivity" | "removeSession" | "reconcileSessionActivity"> | undefined;
 
   constructor(private readonly events: SessionEventHub, deps: PiSessionServiceDependencies = {}) {
     this.archiveStore = deps.archiveStore ?? new SessionArchiveStore();
@@ -219,7 +219,7 @@ export class PiSessionService {
     this.authLossWarnings.clear();
     await Promise.all(activeSessions.map(async (active) => {
       active.unsubscribe();
-      this.workspaceActivity?.removeSession(active.runtime.session.sessionId);
+      this.workspaceActivity?.removeSession(active.runtime.session.sessionId, active.runtime.session.sessionManager.getCwd());
       await active.runtime.session.abort();
       await active.runtime.dispose();
     }));
@@ -234,12 +234,13 @@ export class PiSessionService {
         .map((record) => this.ensureArchivedSessionMoved(record, sessionsById.get(record.sessionId))),
     );
     const archivedById = new Map(archivedForCwd.map((record) => [record.sessionId, record]));
-    const activeSessions = sessions.filter((session) => !archivedById.has(session.id)).map(clientSessionFromListEntry);
+    const unarchivedSessions = sessions.filter((session) => !archivedById.has(session.id)).map(clientSessionFromListEntry);
+    this.workspaceActivity?.reconcileSessionActivity(cwd, this.reconcilableSessionIds(cwd, unarchivedSessions.map((session) => session.id), archivedById));
     const archivedSessions = archivedForCwd
       .sort(compareArchivedRecords)
       .map((record) => clientSessionFromArchivedRecord(record, sessionsById.get(record.sessionId)))
       .filter(isDefined);
-    return [...activeSessions, ...archivedSessions];
+    return [...unarchivedSessions, ...archivedSessions];
   }
 
   async start(cwd: string): Promise<ClientSession> {
@@ -439,6 +440,15 @@ export class PiSessionService {
     });
   }
 
+  private reconcilableSessionIds(cwd: string, listedSessionIds: string[], archivedById: Map<string, ArchivedSessionRecord>): string[] {
+    const sessionIds = new Set(listedSessionIds);
+    for (const active of new Set(this.active.values())) {
+      const session = active.runtime.session;
+      if (session.sessionManager.getCwd() === cwd && !archivedById.has(session.sessionId)) sessionIds.add(session.sessionId);
+    }
+    return [...sessionIds];
+  }
+
   private async ensureArchivedSessionMoved(record: ArchivedSessionRecord, session: PiSessionListEntry | undefined): Promise<ArchivedSessionRecord> {
     if (session === undefined || this.active.has(record.sessionId)) return record;
     try {
@@ -471,7 +481,7 @@ export class PiSessionService {
     if (!active) return;
     this.active.delete(sessionId);
     this.activities.delete(sessionId);
-    this.workspaceActivity?.removeSession(sessionId);
+    this.workspaceActivity?.removeSession(sessionId, active.runtime.session.sessionManager.getCwd());
     this.clearAuthLossWarningsForSession(sessionId);
     clearSessionQueue(active.runtime.session);
     active.unsubscribe();
