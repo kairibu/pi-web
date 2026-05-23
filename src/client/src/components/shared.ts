@@ -64,6 +64,7 @@ export const appStyles = css`
   .context-bar.can-scroll-left::before, .context-bar.can-scroll-right::after { opacity: 1; }
   .context-bar-label { display: none; }
   .context-items { flex: 1 1 auto; min-width: 0; display: flex; align-items: stretch; gap: 5px; margin: 0; padding: 0 0 0 8px; list-style: none; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scroll-padding-inline: 8px; scrollbar-width: thin; }
+  .context-item { flex: 0 0 auto; min-width: 0; display: flex; }
   .context-actions { position: absolute; top: 6px; right: 0; bottom: 6px; z-index: 3; display: flex; align-items: center; padding: 0 8px 0 0; background: var(--pi-bg); }
   .app-refresh { position: relative; display: flex; align-items: center; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
   .app-refresh, .app-refresh * { -webkit-user-select: none; user-select: none; }
@@ -73,7 +74,9 @@ export const appStyles = css`
   .app-refresh-menu { position: fixed; z-index: 10000; box-sizing: border-box; min-width: min(170px, calc(100vw - 16px)); overflow: auto; padding: 4px; border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); box-shadow: 0 8px 24px var(--pi-shadow); overflow-wrap: anywhere; }
   .app-refresh-menu button { display: block; width: 100%; border: 0; background: transparent; color: var(--pi-text); text-align: left; white-space: normal; overflow-wrap: anywhere; }
   .app-refresh-menu button:hover, .app-refresh-menu button:focus { background: var(--pi-selection-bg); }
-  .context-chip { flex: 0 0 auto; min-width: 0; display: inline-flex; align-items: baseline; gap: 5px; border: 1px solid var(--pi-border-muted); border-radius: 999px; background: var(--pi-surface); color: var(--pi-text); padding: 4px 8px; }
+  .context-chip { flex: 0 0 auto; min-width: 0; display: inline-flex; align-items: baseline; gap: 5px; border: 1px solid var(--pi-border-muted); border-radius: 999px; background: var(--pi-surface); color: var(--pi-text); padding: 4px 8px; font: inherit; text-align: left; }
+  .context-chip:hover { background: var(--pi-surface-hover); }
+  .context-chip:focus-visible { outline: 2px solid var(--pi-accent); outline-offset: 2px; }
   .context-chip.empty { border-style: dashed; color: var(--pi-muted); }
   .context-kind { display: none; }
   .context-value { min-width: 0; overflow: visible; text-overflow: clip; white-space: nowrap; }

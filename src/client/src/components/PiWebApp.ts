@@ -559,6 +559,12 @@ export class PiWebApp extends LitElement {
     if (this.isMobileNavigationLayout) this.expandedMobileNavigationSection = section;
   }
 
+  private openNavigationSection(section: NavigationSection): void {
+    if (!this.isMobileNavigationLayout) return;
+    this.expandNavigationSection(section);
+    this.selectMainView("navigation");
+  }
+
   private visibleWorkspacePanels(): QualifiedWorkspacePanelContribution[] {
     const workspace = this.state.selectedWorkspace;
     if (workspace === undefined) return [];
@@ -845,17 +851,23 @@ export class PiWebApp extends LitElement {
       <nav class=${this.contextBarClass()} aria-label="Current location">
         <span class="context-bar-label">Location</span>
         <ol class="context-items" @scroll=${this.onContextScroll}>
-          <li class=${project === undefined ? "context-chip empty" : "context-chip"} title=${projectContextTitle(project)} aria-label=${`Project: ${projectLabel}`}>
-            <span class="context-kind">Project</span>
-            <span class="context-value">${projectLabel}</span>
+          <li class="context-item">
+            <button type="button" class=${project === undefined ? "context-chip empty" : "context-chip"} title=${projectContextTitle(project)} aria-label=${`Project: ${projectLabel}. Open project selection.`} @click=${() => { this.openNavigationSection("projects"); }}>
+              <span class="context-kind">Project</span>
+              <span class="context-value">${projectLabel}</span>
+            </button>
           </li>
-          <li class=${workspace === undefined ? "context-chip empty" : "context-chip"} title=${workspaceContextTitle(workspace)} aria-label=${`Workspace: ${workspaceLabel}`}>
-            <span class="context-kind">Workspace</span>
-            <span class="context-value">${workspaceLabel}</span>
+          <li class="context-item">
+            <button type="button" class=${workspace === undefined ? "context-chip empty" : "context-chip"} title=${workspaceContextTitle(workspace)} aria-label=${`Workspace: ${workspaceLabel}. Open workspace selection.`} @click=${() => { this.openNavigationSection("workspaces"); }}>
+              <span class="context-kind">Workspace</span>
+              <span class="context-value">${workspaceLabel}</span>
+            </button>
           </li>
-          <li class=${session === undefined ? "context-chip empty" : "context-chip"} title=${sessionContextTitle(session)} aria-label=${`Session: ${sessionLabel}`}>
-            <span class="context-kind">Session</span>
-            <span class="context-value">${sessionLabel}</span>
+          <li class="context-item">
+            <button type="button" class=${session === undefined ? "context-chip empty" : "context-chip"} title=${sessionContextTitle(session)} aria-label=${`Session: ${sessionLabel}. Open session selection.`} @click=${() => { this.openNavigationSection("sessions"); }}>
+              <span class="context-kind">Session</span>
+              <span class="context-value">${sessionLabel}</span>
+            </button>
           </li>
         </ol>
         <div class="context-actions">${this.renderAppRefresh()}</div>
