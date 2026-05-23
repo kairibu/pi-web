@@ -1,5 +1,23 @@
 # @jmfederico/pi-web
 
+## 1.202605.12
+
+### Patch Changes
+
+- 13bb8e4: Add a theme-aware dash favicon and uppercase PI WEB page titles.
+- 428f7bb: Add a session list action to archive a session together with its descendant sessions in the same workspace.
+- f4aeb06: Make the mobile location breadcrumbs clickable so they open project, workspace, or session selection directly.
+- 5bc2542: Extend chat diff row backgrounds across the full horizontal scroll area.
+- 9e3d272: Prefill the prompt editor with the selected user message after forking a session.
+- 23e82e1: Improve empty states for workspace tools and session selection when no project, workspace, or session is selected.
+- a1e903f: Add cached image previews up to 10 MB to the workspace file browser for common image file types.
+- df20563: Add refresh controls when PI WEB is launched as a PWA, with action palette commands for refreshing app data or reloading the page.
+- 2f5293a: Fix mobile workspace panels, including the PI WEB status panel, so overflowing content remains scrollable on iPhone.
+- 3409b0a: Name newly forked and cloned web sessions with readable Fork and Copy counters based on the source session title.
+- 6a8f2f2: Prevent the message composer from inserting a stray blank line when starting a new session with the keyboard shortcut.
+- 1546143: Add PWA manifest icons so installed PI WEB apps use the project icon.
+- 1546143: Standardize user-facing PI WEB branding in uppercase across the app, docs, and install metadata.
+
 ## 1.202605.11
 
 ### Patch Changes
