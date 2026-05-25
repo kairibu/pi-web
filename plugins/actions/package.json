@@ -1,6 +1,6 @@
 {
   "name": "@jmfederico/pi-web-actions",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Configurable workspace actions plugin for PI WEB.",
   "license": "MIT",
   "type": "module",
@@ -23,7 +23,7 @@
     "workspace"
   ],
   "peerDependencies": {
-    "@jmfederico/pi-web": ">=1.202605.11 <2"
+    "@jmfederico/pi-web": ">=1.202605.13"
   },
   "peerDependenciesMeta": {
     "@jmfederico/pi-web": {

@@ -1,5 +1,17 @@
 # @jmfederico/pi-web
 
+## 1.202605.13
+
+### Patch Changes
+
+- 57a6a4a: Improve `pi-web doctor` to report missing commands safely, skip Linux systemd checks on non-Linux platforms, and avoid misleading restart advice after the macOS node-pty permission workaround.
+- 34e657d: Add a `pi-web doctor` diagnostic for the upstream macOS node-pty `spawn-helper` permission issue, including the workaround and tracking links.
+- 8247281: Add macOS LaunchAgent service installs and a shared development install mode with `pi-web install --dev`.
+- 4bfd4ac: Add homepage and remote-first website copy that explains PI WEB's persistent-by-default agent workflow.
+- 679008d: Fix workspace and project activity indicators so stale session activity clears instead of reappearing after idle sessions.
+- 56fa641: Restore spellcheck and autocorrect for prose in the web chat prompt while keeping command-like input protected from autocorrection.
+- 711c4f3: Run workspace deletion and configurable workspace actions in visible PI WEB terminals with reload-safe command-run tracking, mobile-friendly cancellation, and shell continuation after command completion.
+
 ## 1.202605.12
 
 ### Patch Changes

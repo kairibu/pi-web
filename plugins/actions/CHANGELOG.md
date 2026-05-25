@@ -1,5 +1,19 @@
 # @jmfederico/pi-web-actions
 
+## 0.1.2
+
+### Patch Changes
+
+- 711c4f3: Run workspace deletion and configurable workspace actions in visible PI WEB terminals with reload-safe command-run tracking, mobile-friendly cancellation, and shell continuation after command completion.
+- Updated dependencies [57a6a4a]
+- Updated dependencies [34e657d]
+- Updated dependencies [8247281]
+- Updated dependencies [4bfd4ac]
+- Updated dependencies [679008d]
+- Updated dependencies [56fa641]
+- Updated dependencies [711c4f3]
+  - @jmfederico/pi-web@1.202605.13
+
 ## 0.1.1
 
 ### Patch Changes
