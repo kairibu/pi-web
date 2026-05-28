@@ -51,6 +51,7 @@ const THEME_AUTO_OFF_VALUE = "auto:off";
 const THEME_OPTION_PREFIX = "theme:";
 const TERMINAL_ROUTE_NAMESPACE = queryNamespace("core:workspace.terminal");
 const REFRESH_LONG_PRESS_MS = 550;
+const VIEWPORT_POSITION_REPAIR_DELAY_MS = 250;
 
 @customElement("pi-web-app")
 export class PiWebApp extends LitElement {
@@ -119,6 +120,8 @@ export class PiWebApp extends LitElement {
   private themePreference: ThemePreference = readStoredThemePreference() ?? DEFAULT_THEME_PREFERENCE;
   private refreshLongPressTimer: number | undefined;
   private suppressNextRefreshClick = false;
+  private viewportPositionRepairFrame: number | undefined;
+  private viewportPositionRepairTimer: number | undefined;
   @state() private activeThemeId: QualifiedContributionId = CLASSIC_THEME_ID;
   @state() private isMobileNavigationLayout = this.mobileNavigationMedia?.matches ?? false;
   @state() private isPwaDisplayMode = detectPwaDisplayMode(this.pwaDisplayModeMedia);
@@ -131,7 +134,11 @@ export class PiWebApp extends LitElement {
   @state() private mobileTabsCanScrollLeft = false;
   @state() private mobileTabsCanScrollRight = false;
   private readonly onPopState = () => void this.withChatScrollTransition(() => this.restoreRoute(false));
+  private readonly onPageShow = () => {
+    this.repairViewportPosition();
+  };
   private readonly onFocus = () => {
+    this.repairViewportPosition();
     void this.sessions.refreshSelectedSession();
     void this.refreshPiWebStatus();
     void this.refreshWorkspaceActivity();
@@ -139,6 +146,7 @@ export class PiWebApp extends LitElement {
   };
   private readonly onVisibilityChange = () => {
     if (document.visibilityState === "visible") {
+      this.repairViewportPosition();
       void this.sessions.refreshSelectedSession();
       void this.refreshPiWebStatus();
       void this.refreshWorkspaceActivity();
@@ -185,6 +193,7 @@ export class PiWebApp extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     window.addEventListener("popstate", this.onPopState);
+    window.addEventListener("pageshow", this.onPageShow);
     window.addEventListener("focus", this.onFocus);
     document.addEventListener("click", this.onDocumentClick);
     document.addEventListener("visibilitychange", this.onVisibilityChange);
@@ -203,6 +212,7 @@ export class PiWebApp extends LitElement {
 
   override disconnectedCallback(): void {
     window.removeEventListener("popstate", this.onPopState);
+    window.removeEventListener("pageshow", this.onPageShow);
     window.removeEventListener("focus", this.onFocus);
     document.removeEventListener("click", this.onDocumentClick);
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
@@ -226,6 +236,7 @@ export class PiWebApp extends LitElement {
     this.mobileTabsResizeObserver = undefined;
     this.observedMobileTabs = undefined;
     this.clearRefreshLongPressTimer();
+    this.clearViewportPositionRepair();
     super.disconnectedCallback();
   }
 
@@ -353,7 +364,51 @@ export class PiWebApp extends LitElement {
     await this.chatView?.updateComplete;
     await nextFrame();
     this.chatView?.restoreScrollPosition();
-    this.promptEditor?.focusInput();
+    if (this.shouldAutoFocusPrompt()) this.promptEditor?.focusInput();
+  }
+
+  private shouldAutoFocusPrompt(): boolean {
+    return !this.isMobileNavigationLayout && !this.isPwaDisplayMode;
+  }
+
+  private repairViewportPosition(): void {
+    if (!this.shouldRepairViewportPosition()) return;
+    this.resetViewportScroll();
+    if (this.viewportPositionRepairFrame !== undefined) window.cancelAnimationFrame(this.viewportPositionRepairFrame);
+    this.viewportPositionRepairFrame = window.requestAnimationFrame(() => {
+      this.viewportPositionRepairFrame = undefined;
+      this.resetViewportScroll();
+      this.viewportPositionRepairFrame = window.requestAnimationFrame(() => {
+        this.viewportPositionRepairFrame = undefined;
+        this.resetViewportScroll();
+      });
+    });
+    if (this.viewportPositionRepairTimer !== undefined) window.clearTimeout(this.viewportPositionRepairTimer);
+    this.viewportPositionRepairTimer = window.setTimeout(() => {
+      this.viewportPositionRepairTimer = undefined;
+      this.resetViewportScroll();
+    }, VIEWPORT_POSITION_REPAIR_DELAY_MS);
+  }
+
+  private shouldRepairViewportPosition(): boolean {
+    return this.isMobileNavigationLayout || this.isPwaDisplayMode;
+  }
+
+  private resetViewportScroll(): void {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }
+
+  private clearViewportPositionRepair(): void {
+    if (this.viewportPositionRepairFrame !== undefined) {
+      window.cancelAnimationFrame(this.viewportPositionRepairFrame);
+      this.viewportPositionRepairFrame = undefined;
+    }
+    if (this.viewportPositionRepairTimer !== undefined) {
+      window.clearTimeout(this.viewportPositionRepairTimer);
+      this.viewportPositionRepairTimer = undefined;
+    }
   }
 
   private async withChatPrependTransition(action: () => Promise<void>) {
