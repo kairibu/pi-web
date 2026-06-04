@@ -1,0 +1,64 @@
+export type FederatedHttpMethod = "GET" | "POST" | "DELETE";
+
+export interface FederatedHttpRouteSpec {
+  method: FederatedHttpMethod;
+  path: string;
+}
+
+export const FEDERATED_HTTP_ROUTES = [
+  { method: "GET", path: "/projects" },
+  { method: "POST", path: "/projects" },
+  { method: "DELETE", path: "/projects/:projectId" },
+  { method: "GET", path: "/project-directories" },
+  { method: "GET", path: "/projects/:projectId/workspaces" },
+  { method: "GET", path: "/projects/:projectId/workspaces/:workspaceId/tree" },
+  { method: "GET", path: "/projects/:projectId/workspaces/:workspaceId/file" },
+  { method: "GET", path: "/projects/:projectId/workspaces/:workspaceId/file/preview" },
+  { method: "GET", path: "/projects/:projectId/workspaces/:workspaceId/git/status" },
+  { method: "GET", path: "/projects/:projectId/workspaces/:workspaceId/git/diff" },
+  { method: "GET", path: "/projects/:projectId/workspaces/:workspaceId/terminals" },
+  { method: "POST", path: "/projects/:projectId/workspaces/:workspaceId/terminals" },
+  { method: "POST", path: "/projects/:projectId/workspaces/:workspaceId/terminals/:terminalId/continue" },
+  { method: "DELETE", path: "/projects/:projectId/workspaces/:workspaceId/terminals/:terminalId" },
+  { method: "POST", path: "/projects/:projectId/workspaces/:workspaceId/terminal-command-runs" },
+  { method: "GET", path: "/terminal-command-runs" },
+  { method: "GET", path: "/terminal-command-runs/:runId" },
+  { method: "POST", path: "/terminal-command-runs/:runId/cancel" },
+  { method: "GET", path: "/files" },
+  { method: "GET", path: "/activity" },
+  { method: "GET", path: "/sessions" },
+  { method: "POST", path: "/sessions" },
+  { method: "GET", path: "/sessions/:sessionId/messages" },
+  { method: "GET", path: "/sessions/:sessionId/status" },
+  { method: "GET", path: "/sessions/:sessionId/models" },
+  { method: "POST", path: "/sessions/:sessionId/model" },
+  { method: "POST", path: "/sessions/:sessionId/model/cycle" },
+  { method: "GET", path: "/sessions/:sessionId/thinking-levels" },
+  { method: "POST", path: "/sessions/:sessionId/thinking-level" },
+  { method: "POST", path: "/sessions/:sessionId/thinking-level/cycle" },
+  { method: "GET", path: "/sessions/:sessionId/commands" },
+  { method: "POST", path: "/sessions/:sessionId/prompt" },
+  { method: "POST", path: "/sessions/:sessionId/shell" },
+  { method: "POST", path: "/sessions/:sessionId/commands/run" },
+  { method: "POST", path: "/sessions/:sessionId/commands/respond" },
+  { method: "POST", path: "/sessions/:sessionId/abort" },
+  { method: "POST", path: "/sessions/:sessionId/stop" },
+  { method: "POST", path: "/sessions/:sessionId/archive" },
+  { method: "POST", path: "/sessions/:sessionId/archive-tree" },
+  { method: "POST", path: "/sessions/:sessionId/restore" },
+  { method: "POST", path: "/sessions/:sessionId/detach-parent" },
+  { method: "GET", path: "/auth/providers" },
+  { method: "POST", path: "/auth/api-key" },
+  { method: "POST", path: "/auth/logout" },
+  { method: "POST", path: "/auth/oauth" },
+  { method: "GET", path: "/auth/oauth/:flowId" },
+  { method: "POST", path: "/auth/oauth/:flowId/respond" },
+  { method: "POST", path: "/auth/oauth/:flowId/cancel" },
+] as const satisfies readonly FederatedHttpRouteSpec[];
+
+export const FEDERATED_WEBSOCKET_ROUTES = [
+  "/events",
+  "/sessions/events",
+  "/sessions/:sessionId/events",
+  "/projects/:projectId/workspaces/:workspaceId/terminals/:terminalId/socket",
+] as const satisfies readonly string[];

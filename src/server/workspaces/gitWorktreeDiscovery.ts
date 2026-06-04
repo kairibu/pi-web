@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { sanitizedGitEnv } from "../git/gitEnv.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -12,7 +13,7 @@ export interface GitWorktreeInfo {
 
 export async function isGitRepository(path: string): Promise<boolean> {
   try {
-    const { stdout } = await execFileAsync("git", ["-C", path, "rev-parse", "--is-inside-work-tree"]);
+    const { stdout } = await execFileAsync("git", ["-C", path, "rev-parse", "--is-inside-work-tree"], { env: sanitizedGitEnv() });
     return stdout.trim() === "true";
   } catch {
     return false;
@@ -20,7 +21,7 @@ export async function isGitRepository(path: string): Promise<boolean> {
 }
 
 export async function discoverGitWorktrees(path: string): Promise<GitWorktreeInfo[]> {
-  const { stdout } = await execFileAsync("git", ["-C", path, "worktree", "list", "--porcelain"]);
+  const { stdout } = await execFileAsync("git", ["-C", path, "worktree", "list", "--porcelain"], { env: sanitizedGitEnv() });
   const chunks = stdout.trim().split(/\n\s*\n/).filter(Boolean);
 
   return chunks.map((chunk) => {

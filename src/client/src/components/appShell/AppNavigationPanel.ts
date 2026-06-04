@@ -1,13 +1,17 @@
 import { LitElement, css, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import type { Project, SessionActivity, SessionInfo, SessionStatus, Workspace, WorkspaceActivity } from "../../api";
+import type { Machine, MachineHealth, Project, SessionActivity, SessionInfo, SessionStatus, Workspace, WorkspaceActivity } from "../../api";
 import type { WorkspaceLabelItem } from "../../plugins/types";
+import "../MachineList";
 import "../ProjectList";
 import "../WorkspaceList";
 import "../SessionList";
 
 @customElement("app-navigation-panel")
 export class AppNavigationPanel extends LitElement {
+  @property({ attribute: false }) machines: Machine[] = [];
+  @property({ attribute: false }) selectedMachine?: Machine;
+  @property({ attribute: false }) machineStatuses: Record<string, MachineHealth> = {};
   @property({ attribute: false }) projects: Project[] = [];
   @property({ attribute: false }) selectedProject?: Project;
   @property({ attribute: false }) workspaces: Workspace[] = [];
@@ -22,11 +26,13 @@ export class AppNavigationPanel extends LitElement {
   @property({ attribute: false }) workspaceLabelItems: (workspace: Workspace) => WorkspaceLabelItem[] = () => [];
   @property({ attribute: false }) refreshControl: unknown;
   @property({ type: Boolean, reflect: true }) collapsible = false;
+  @property({ type: Boolean }) machinesCollapsed = false;
   @property({ type: Boolean }) projectsCollapsed = false;
   @property({ type: Boolean }) workspacesCollapsed = false;
   @property({ type: Boolean }) sessionsCollapsed = false;
   @property({ type: Boolean }) canStartSession = false;
   @property({ attribute: false }) onShowActions?: () => void;
+  @property({ attribute: false }) onToggleMachines?: () => void;
   @property({ attribute: false }) onToggleProjects?: () => void;
   @property({ attribute: false }) onToggleWorkspaces?: () => void;
   @property({ attribute: false }) onToggleSessions?: () => void;
@@ -42,6 +48,8 @@ export class AppNavigationPanel extends LitElement {
   @property({ attribute: false }) onDeleteCachedNewSession?: (session: SessionInfo) => void | Promise<void>;
   @property({ attribute: false }) onDetachParentSession?: (session: SessionInfo) => void | Promise<void>;
   @property({ attribute: false }) onArchivedCollapsed?: () => void | Promise<void>;
+  @property({ attribute: false }) onSelectMachine?: (machine: Machine) => void | Promise<void>;
+  @property({ attribute: false }) onRemoveMachine?: (machine: Machine) => void | Promise<void>;
 
   override render() {
     return html`
@@ -52,6 +60,18 @@ export class AppNavigationPanel extends LitElement {
           <button title="Show Actions" aria-label="Show Actions" @click=${() => { this.onShowActions?.(); }}>Actions</button>
         </div>
       </header>
+      ${shouldShowMachinesSection(this.machines) ? html`
+        <machine-list
+          .machines=${this.machines}
+          .selected=${this.selectedMachine}
+          .statuses=${this.machineStatuses}
+          .collapsible=${this.collapsible}
+          .collapsed=${this.machinesCollapsed}
+          .onToggleCollapsed=${() => { this.onToggleMachines?.(); }}
+          .onSelect=${(machine: Machine) => this.onSelectMachine?.(machine)}
+          .onRemove=${(machine: Machine) => this.onRemoveMachine?.(machine)}
+        ></machine-list>
+      ` : null}
       <project-list
         .projects=${this.projects}
         .selected=${this.selectedProject}
@@ -102,14 +122,20 @@ export class AppNavigationPanel extends LitElement {
     header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px; border-bottom: 1px solid var(--pi-border); }
     :host([collapsible]) header { display: none; }
     .header-actions { display: flex; align-items: center; gap: 8px; }
-    project-list, workspace-list { flex: 0 0 auto; max-height: 26%; min-height: 0; overflow: hidden; border-bottom: 1px solid var(--pi-border-muted); }
+    machine-list, project-list, workspace-list { flex: 0 0 auto; max-height: 26%; min-height: 0; overflow: hidden; border-bottom: 1px solid var(--pi-border-muted); }
     session-list { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+    :host([collapsible]) machine-list,
     :host([collapsible]) project-list,
     :host([collapsible]) workspace-list,
     :host([collapsible]) session-list { flex: 1 1 auto; max-height: none; min-height: 0; overflow: hidden; }
+    :host([collapsible]) machine-list[collapsed],
     :host([collapsible]) project-list[collapsed],
     :host([collapsible]) workspace-list[collapsed],
     :host([collapsible]) session-list[collapsed] { flex: 0 0 auto; min-height: auto; overflow: hidden; }
     button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
   `;
+}
+
+export function shouldShowMachinesSection(machines: readonly Machine[]): boolean {
+  return machines.length > 1;
 }

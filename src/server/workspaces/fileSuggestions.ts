@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { readdir, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
+import { sanitizedGitEnv } from "../git/gitEnv.js";
 import type { ClientFileSuggestion } from "../types.js";
 
 const execFileAsync = promisify(execFile);
@@ -11,6 +12,7 @@ const maxFilesystemFallbackPaths = 20_000;
 interface ExecFileOptions {
   cwd: string;
   maxBuffer: number;
+  env?: NodeJS.ProcessEnv;
 }
 
 export type FileSuggestionScope = "tracked" | "all";
@@ -128,7 +130,7 @@ async function isSymlinkedFile(cwd: string, relativePath: string, symbolicLink: 
 }
 
 async function git(cwd: string, args: string[], exec: NonNullable<FileSuggestionDependencies["execFile"]>): Promise<string> {
-  const { stdout } = await exec("git", args, { cwd, maxBuffer: commandMaxBuffer });
+  const { stdout } = await exec("git", args, { cwd, env: sanitizedGitEnv(), maxBuffer: commandMaxBuffer });
   return stdout;
 }
 

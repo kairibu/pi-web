@@ -1,13 +1,14 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { ProjectService } from "./projects/projectService.js";
 import { SessionDaemonClient } from "../sessiond/sessionDaemonClient.js";
+import type { SessionProxyDaemon } from "./sessiond/sessionProxyRoutes.js";
 import { resolveWorkspaceContext } from "./workspaces/workspaceContext.js";
 import type { WorkspaceService } from "./workspaces/workspaceService.js";
 import { terminalSizeQuery } from "./terminals/terminalSize.js";
 import { bridgeSockets } from "./webSocketBridge.js";
 
-export function registerTerminalProxyRoutes(app: FastifyInstance, projects: ProjectService, workspaces: WorkspaceService, daemon = new SessionDaemonClient()): void {
-  app.get<{ Params: { projectId: string; workspaceId: string } }>("/api/projects/:projectId/workspaces/:workspaceId/terminals", async (request, reply) => {
+export function registerTerminalProxyRoutes(app: FastifyInstance, projects: ProjectService, workspaces: WorkspaceService, daemon: SessionProxyDaemon = new SessionDaemonClient(), prefix = "/api"): void {
+  app.get<{ Params: { projectId: string; workspaceId: string } }>(`${prefix}/projects/:projectId/workspaces/:workspaceId/terminals`, async (request, reply) => {
     try {
       const context = await resolveWorkspaceContext(projects, workspaces, request.params.projectId, request.params.workspaceId);
       return await proxyJson(daemon, "GET", `/terminals?cwd=${encodeURIComponent(context.root)}`, undefined, reply);
@@ -17,7 +18,7 @@ export function registerTerminalProxyRoutes(app: FastifyInstance, projects: Proj
     }
   });
 
-  app.post<{ Params: { projectId: string; workspaceId: string }; Body: { name?: string; cols?: number; rows?: number } }>("/api/projects/:projectId/workspaces/:workspaceId/terminals", async (request, reply) => {
+  app.post<{ Params: { projectId: string; workspaceId: string }; Body: { name?: string; cols?: number; rows?: number } }>(`${prefix}/projects/:projectId/workspaces/:workspaceId/terminals`, async (request, reply) => {
     try {
       const context = await resolveWorkspaceContext(projects, workspaces, request.params.projectId, request.params.workspaceId);
       return await proxyJson(daemon, "POST", "/terminals", { ...request.body, cwd: context.root }, reply);
@@ -27,7 +28,7 @@ export function registerTerminalProxyRoutes(app: FastifyInstance, projects: Proj
     }
   });
 
-  app.post<{ Params: { projectId: string; workspaceId: string; terminalId: string } }>("/api/projects/:projectId/workspaces/:workspaceId/terminals/:terminalId/continue", async (request, reply) => {
+  app.post<{ Params: { projectId: string; workspaceId: string; terminalId: string } }>(`${prefix}/projects/:projectId/workspaces/:workspaceId/terminals/:terminalId/continue`, async (request, reply) => {
     try {
       await resolveWorkspaceContext(projects, workspaces, request.params.projectId, request.params.workspaceId);
       return await proxyJson(daemon, "POST", `/terminals/${encodeURIComponent(request.params.terminalId)}/continue`, undefined, reply);
@@ -37,7 +38,7 @@ export function registerTerminalProxyRoutes(app: FastifyInstance, projects: Proj
     }
   });
 
-  app.delete<{ Params: { projectId: string; workspaceId: string; terminalId: string } }>("/api/projects/:projectId/workspaces/:workspaceId/terminals/:terminalId", async (request, reply) => {
+  app.delete<{ Params: { projectId: string; workspaceId: string; terminalId: string } }>(`${prefix}/projects/:projectId/workspaces/:workspaceId/terminals/:terminalId`, async (request, reply) => {
     try {
       await resolveWorkspaceContext(projects, workspaces, request.params.projectId, request.params.workspaceId);
       return await proxyJson(daemon, "DELETE", `/terminals/${encodeURIComponent(request.params.terminalId)}`, undefined, reply);
@@ -47,7 +48,7 @@ export function registerTerminalProxyRoutes(app: FastifyInstance, projects: Proj
     }
   });
 
-  app.post<{ Params: { projectId: string; workspaceId: string }; Body: TerminalCommandRunRequest }>("/api/projects/:projectId/workspaces/:workspaceId/terminal-command-runs", async (request, reply) => {
+  app.post<{ Params: { projectId: string; workspaceId: string }; Body: TerminalCommandRunRequest }>(`${prefix}/projects/:projectId/workspaces/:workspaceId/terminal-command-runs`, async (request, reply) => {
     try {
       const context = await resolveWorkspaceContext(projects, workspaces, request.params.projectId, request.params.workspaceId);
       return await proxyJson(daemon, "POST", "/terminal-command-runs", {
@@ -65,7 +66,7 @@ export function registerTerminalProxyRoutes(app: FastifyInstance, projects: Proj
     }
   });
 
-  app.get<{ Querystring: TerminalCommandRunQuery }>("/api/terminal-command-runs", async (request, reply) => {
+  app.get<{ Querystring: TerminalCommandRunQuery }>(`${prefix}/terminal-command-runs`, async (request, reply) => {
     try {
       return await proxyJson(daemon, "GET", `/terminal-command-runs${terminalCommandRunQuery(request.query)}`, undefined, reply);
     } catch (error) {
@@ -74,7 +75,7 @@ export function registerTerminalProxyRoutes(app: FastifyInstance, projects: Proj
     }
   });
 
-  app.post<{ Params: { runId: string } }>("/api/terminal-command-runs/:runId/cancel", async (request, reply) => {
+  app.post<{ Params: { runId: string } }>(`${prefix}/terminal-command-runs/:runId/cancel`, async (request, reply) => {
     try {
       return await proxyJson(daemon, "POST", `/terminal-command-runs/${encodeURIComponent(request.params.runId)}/cancel`, undefined, reply);
     } catch (error) {
@@ -83,7 +84,7 @@ export function registerTerminalProxyRoutes(app: FastifyInstance, projects: Proj
     }
   });
 
-  app.get<{ Params: { runId: string } }>("/api/terminal-command-runs/:runId", async (request, reply) => {
+  app.get<{ Params: { runId: string } }>(`${prefix}/terminal-command-runs/:runId`, async (request, reply) => {
     try {
       return await proxyJson(daemon, "GET", `/terminal-command-runs/${encodeURIComponent(request.params.runId)}`, undefined, reply);
     } catch (error) {
@@ -92,7 +93,7 @@ export function registerTerminalProxyRoutes(app: FastifyInstance, projects: Proj
     }
   });
 
-  app.get<{ Params: { projectId: string; workspaceId: string; terminalId: string }; Querystring: { cols?: string; rows?: string } }>("/api/projects/:projectId/workspaces/:workspaceId/terminals/:terminalId/socket", { websocket: true }, async (socket, request) => {
+  app.get<{ Params: { projectId: string; workspaceId: string; terminalId: string }; Querystring: { cols?: string; rows?: string } }>(`${prefix}/projects/:projectId/workspaces/:workspaceId/terminals/:terminalId/socket`, { websocket: true }, async (socket, request) => {
     try {
       await resolveWorkspaceContext(projects, workspaces, request.params.projectId, request.params.workspaceId);
       const sizeQuery = terminalSizeQuery(request.query.cols, request.query.rows);
@@ -130,7 +131,7 @@ function terminalCommandRunQuery(filter: TerminalCommandRunQuery): string {
   return query === "" ? "" : `?${query}`;
 }
 
-async function proxyJson(daemon: SessionDaemonClient, method: string, path: string, body: unknown, reply: FastifyReply): Promise<unknown> {
+async function proxyJson(daemon: SessionProxyDaemon, method: string, path: string, body: unknown, reply: FastifyReply): Promise<unknown> {
   const upstream = await daemon.request(method, path, body);
   reply.code(upstream.statusCode);
   const contentType = upstream.headers["content-type"];

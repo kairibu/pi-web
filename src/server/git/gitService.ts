@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import type { GitDiffResponse, GitFileState, GitStatusFile, GitStatusResponse } from "../../shared/apiTypes.js";
 import { normalizeRelativePath } from "../workspaces/pathSafety.js";
+import { sanitizedGitEnv } from "./gitEnv.js";
 
 const MAX_OUTPUT = 2 * 1024 * 1024;
 
@@ -95,7 +96,7 @@ function hash(value: string): string {
 
 async function runGit(cwd: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string; truncated: boolean }> {
   return new Promise((resolve, reject) => {
-    const child = spawn("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("git", args, { cwd, env: sanitizedGitEnv(), stdio: ["ignore", "pipe", "pipe"] });
     const timer = setTimeout(() => { child.kill("SIGKILL"); }, 10000);
     let stdout = Buffer.alloc(0);
     let stderr = Buffer.alloc(0);
