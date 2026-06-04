@@ -2,6 +2,7 @@ import { html, type TemplateResult } from "lit";
 import type { FileContentResponse, FileTreeEntry, GitDiffResponse, GitStatusResponse } from "../../api";
 import { workspaceImagePreviewUrl } from "../../api/urls";
 import { MAX_IMAGE_PREVIEW_BYTES, MAX_IMAGE_PREVIEW_LABEL } from "../../../../shared/workspaceFiles";
+import { renderBuiltinTabIcon } from "../../components/tabIcons";
 import type { WorkspacePanelContribution, WorkspacePanelContext } from "../types";
 
 export function createCoreWorkspacePanels(): WorkspacePanelContribution[] {
@@ -9,12 +10,14 @@ export function createCoreWorkspacePanels(): WorkspacePanelContribution[] {
     {
       id: "workspace.files",
       title: "Files",
+      icon: renderBuiltinTabIcon("files"),
       order: 10,
       render: renderFiles,
     },
     {
       id: "workspace.git",
       title: "Git",
+      icon: renderBuiltinTabIcon("git"),
       order: 20,
       visible: ({ workspace }) => workspace.isGitRepo,
       render: renderGit,
@@ -22,6 +25,7 @@ export function createCoreWorkspacePanels(): WorkspacePanelContribution[] {
     {
       id: "workspace.terminal",
       title: "Terminal",
+      icon: renderBuiltinTabIcon("terminal"),
       order: 30,
       badge: (context) => context.activeTerminalCount > 0 ? context.activeTerminalCount : undefined,
       render: renderTerminal,

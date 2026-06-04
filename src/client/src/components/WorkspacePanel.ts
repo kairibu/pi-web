@@ -10,6 +10,8 @@ export interface WorkspacePanelEmptyState {
   body?: string;
 }
 
+type WorkspacePanelBadge = string | number | TemplateResult | undefined;
+
 @customElement("workspace-panel")
 export class WorkspacePanel extends LitElement {
   @property({ attribute: false }) workspace: Workspace | undefined;
@@ -66,9 +68,16 @@ export class WorkspacePanel extends LitElement {
           <div class="workspace-header-strip" @scroll=${this.onWorkspaceHeaderScroll}>
             ${this.hideToolTabs ? null : html`
               <div class="tabs">
-                ${visiblePanels.map((panel) => html`
-                  <button class=${selectedPanel?.id === panel.id ? "selected" : ""} @click=${() => { this.onSelectTool(panel.id); }}>${this.renderPanelTitle(panel, context)}</button>
-                `)}
+                ${visiblePanels.map((panel) => {
+                  const selected = selectedPanel?.id === panel.id;
+                  const badge = panel.badge?.(context);
+                  const ariaLabel = this.panelTabAriaLabel(panel, badge);
+                  return html`
+                    <button class=${this.panelTabClass(panel, selected)} title=${ariaLabel} aria-label=${ariaLabel} aria-pressed=${String(selected)} @click=${() => { this.onSelectTool(panel.id); }}>
+                      ${this.renderPanelTabContent(panel, badge)}
+                    </button>
+                  `;
+                })}
               </div>
             `}
             <small>${renderWorkspaceLabel(workspace.label, this.workspaceLabelItems, workspace.path)}</small>
@@ -86,10 +95,29 @@ export class WorkspacePanel extends LitElement {
     `;
   }
 
-  private renderPanelTitle(panel: QualifiedWorkspacePanelContribution, context: WorkspacePanelContext): TemplateResult {
-    const badge = panel.badge?.(context);
-    if (badge === undefined || badge === "") return html`${panel.title}`;
-    return html`${panel.title} <span class="tab-badge">${badge}</span>`;
+  private panelTabClass(panel: QualifiedWorkspacePanelContribution, selected: boolean): string {
+    return [
+      ...(panel.icon === undefined ? [] : ["icon-tab"]),
+      ...(selected ? ["selected"] : []),
+    ].join(" ");
+  }
+
+  private panelTabAriaLabel(panel: QualifiedWorkspacePanelContribution, badge: WorkspacePanelBadge): string {
+    if (typeof badge !== "string" && typeof badge !== "number") return panel.title;
+    const trimmedBadge = String(badge).trim();
+    return trimmedBadge === "" ? panel.title : `${panel.title}, ${trimmedBadge}`;
+  }
+
+  private renderPanelTabContent(panel: QualifiedWorkspacePanelContribution, badge: WorkspacePanelBadge): TemplateResult {
+    return html`
+      ${panel.icon === undefined ? null : html`<span class="tab-custom-icon" aria-hidden="true">${panel.icon}</span>`}
+      <span class="tab-label">${panel.title}</span>
+      ${this.isEmptyBadge(badge) ? null : html`<span class="tab-badge">${badge}</span>`}
+    `;
+  }
+
+  private isEmptyBadge(badge: WorkspacePanelBadge): boolean {
+    return badge === undefined || badge === "";
   }
 
   private renderEmptyState(state: WorkspacePanelEmptyState): TemplateResult {
