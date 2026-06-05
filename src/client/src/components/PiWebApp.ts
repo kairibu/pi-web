@@ -27,7 +27,7 @@ import { loadExternalPlugins } from "../plugins/external";
 import { PluginRegistry, installPluginRuntimeScope, installWorkspacePanelScope } from "../plugins/registry";
 import { queryNamespace, readNamespacedString, setNamespacedQueryKey } from "../namespacedQueryArgs";
 import { AppShellController } from "../appShell/appShellController";
-import { MobileNavigationController, type NavigationSection } from "../appShell/navigationState";
+import { NavigationSectionsController, type NavigationSection } from "../appShell/navigationState";
 import { PanelCollapseController, mainViewClass } from "../appShell/panelCollapseController";
 import { readRoute, writeRoute, type AppRoute } from "../route";
 import { readSettingsSection, writeSettingsSection, type SettingsSection } from "../settingsRoute";
@@ -127,7 +127,7 @@ export class PiWebApp extends LitElement {
   private readonly terminalSelection = new SessionStorageTerminalSelectionMemory();
   private readonly appShell = new AppShellController(this);
   private readonly panelCollapse = new PanelCollapseController(this);
-  private readonly mobileNavigation = new MobileNavigationController(
+  private readonly navigationSections = new NavigationSectionsController(
     this,
     () => this.state,
     () => this.appShell.isMobileNavigationLayout,
@@ -777,10 +777,10 @@ export class PiWebApp extends LitElement {
         .selectedMachine=${this.state.selectedMachine}
         .machineStatuses=${this.state.machineStatuses}
         .machineActivities=${this.state.machineActivities}
-        .machinesCollapsed=${this.mobileNavigation.isCollapsed("machines")}
-        .onToggleMachines=${() => { this.mobileNavigation.toggle("machines"); }}
+        .machinesCollapsed=${this.navigationSections.isCollapsed("machines")}
+        .onToggleMachines=${() => { this.navigationSections.toggle("machines"); }}
         .onSelectMachine=${(machine: Machine) => this.withChatScrollTransition(async () => {
-          this.mobileNavigation.expand("projects");
+          this.navigationSections.advanceAfterSelection("machines");
           await this.selectMachineWithMemory(machine);
         })}
         .onRemoveMachine=${(machine: Machine) => { void this.removeMachine(machine); }}
@@ -796,32 +796,42 @@ export class PiWebApp extends LitElement {
         .sessionActivities=${this.state.sessionActivities}
         .selectedSession=${this.state.selectedSession}
         .canStartSession=${!!this.state.selectedWorkspace}
-        .collapsible=${this.appShell.isMobileNavigationLayout}
-        .projectsCollapsed=${this.mobileNavigation.isCollapsed("projects")}
-        .workspacesCollapsed=${this.mobileNavigation.isCollapsed("workspaces")}
-        .sessionsCollapsed=${this.mobileNavigation.isCollapsed("sessions")}
+        .collapsible=${true}
+        .compact=${this.appShell.isMobileNavigationLayout}
+        .projectsCollapsed=${this.navigationSections.isCollapsed("projects")}
+        .workspacesCollapsed=${this.navigationSections.isCollapsed("workspaces")}
+        .sessionsCollapsed=${this.navigationSections.isCollapsed("sessions")}
         .workspaceLabelItems=${(workspace: Workspace) => this.workspaceLabelItems(workspace)}
         .refreshControl=${this.appShell.shouldShowAppRefreshInHeader() ? this.renderAppRefresh() : undefined}
         .onShowActions=${() => { this.setState({ actionPaletteOpen: true }); }}
-        .onToggleProjects=${() => { this.mobileNavigation.toggle("projects"); }}
-        .onToggleWorkspaces=${() => { this.mobileNavigation.toggle("workspaces"); }}
-        .onToggleSessions=${() => { this.mobileNavigation.toggle("sessions"); }}
+        .onToggleProjects=${() => { this.navigationSections.toggle("projects"); }}
+        .onToggleWorkspaces=${() => { this.navigationSections.toggle("workspaces"); }}
+        .onToggleSessions=${() => { this.navigationSections.toggle("sessions"); }}
         .onSelectProject=${(project: Project) => this.withChatScrollTransition(async () => {
-          this.mobileNavigation.expand("workspaces");
+          this.navigationSections.advanceAfterSelection("projects");
           await this.workspaces.selectProject(project);
         })}
         .onCloseProject=${(project: Project) => this.projects.closeProject(project.id)}
         .onSelectWorkspace=${(workspace: Workspace) => this.withChatScrollTransition(async () => {
-          this.mobileNavigation.expand("sessions");
+          this.navigationSections.advanceAfterSelection("workspaces");
           await this.workspaces.selectWorkspace(workspace);
         })}
         .onDeleteWorkspace=${(workspace: Workspace) => { void this.deleteWorkspace(workspace); }}
         .onArchivedCollapsed=${() => { this.sessions.clearSelectionAfterArchivedCollapse(); }}
-        .onStartSession=${() => openChatAfter(() => this.sessions.startSession())}
-        .onSelectSession=${(session: SessionInfo) => openChatAfter(() => this.sessions.selectSession(session))}
+        .onStartSession=${() => openChatAfter(() => {
+          this.navigationSections.advanceAfterSelection("sessions");
+          return this.sessions.startSession();
+        })}
+        .onSelectSession=${(session: SessionInfo) => openChatAfter(() => {
+          this.navigationSections.advanceAfterSelection("sessions");
+          return this.sessions.selectSession(session);
+        })}
         .onArchiveSession=${(session: SessionInfo) => this.sessions.archiveSession(session)}
         .onArchiveSessionWithDescendants=${(session: SessionInfo) => this.sessions.archiveSessionWithDescendants(session)}
-        .onRestoreSession=${(session: SessionInfo) => openChatAfter(() => this.sessions.restoreSession(session))}
+        .onRestoreSession=${(session: SessionInfo) => openChatAfter(() => {
+          this.navigationSections.advanceAfterSelection("sessions");
+          return this.sessions.restoreSession(session);
+        })}
         .onDeleteCachedNewSession=${(session: SessionInfo) => this.sessions.deleteCachedNewSession(session)}
         .onDetachParentSession=${(session: SessionInfo) => this.sessions.detachParent(session)}
       ></app-navigation-panel>
@@ -829,7 +839,7 @@ export class PiWebApp extends LitElement {
   }
 
   private openNavigationSection(section: NavigationSection): void {
-    this.mobileNavigation.open(section, () => { this.selectMainView("navigation"); });
+    this.navigationSections.open(section, () => { this.selectMainView("navigation"); });
   }
 
   private visibleWorkspacePanels(): QualifiedWorkspacePanelContribution[] {

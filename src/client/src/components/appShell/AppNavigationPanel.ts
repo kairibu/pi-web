@@ -27,6 +27,7 @@ export class AppNavigationPanel extends LitElement {
   @property({ attribute: false }) workspaceLabelItems: (workspace: Workspace) => WorkspaceLabelItem[] = () => [];
   @property({ attribute: false }) refreshControl: unknown;
   @property({ type: Boolean, reflect: true }) collapsible = false;
+  @property({ type: Boolean, reflect: true }) compact = false;
   @property({ type: Boolean }) machinesCollapsed = false;
   @property({ type: Boolean }) projectsCollapsed = false;
   @property({ type: Boolean }) workspacesCollapsed = false;
@@ -120,20 +121,24 @@ export class AppNavigationPanel extends LitElement {
 
   static override styles = css`
     :host { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-    :host([collapsible]) { flex: 1 1 auto; }
+    :host([compact]) { flex: 1 1 auto; }
     header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px; border-bottom: 1px solid var(--pi-border); }
-    :host([collapsible]) header { display: none; }
+    :host([compact]) header { display: none; }
     .header-actions { display: flex; align-items: center; gap: 8px; }
     machine-list, project-list, workspace-list { flex: 0 0 auto; max-height: 26%; min-height: 0; overflow: hidden; border-bottom: 1px solid var(--pi-border-muted); }
     session-list { flex: 1 1 auto; min-height: 0; overflow: hidden; }
-    :host([collapsible]) machine-list,
-    :host([collapsible]) project-list,
-    :host([collapsible]) workspace-list,
-    :host([collapsible]) session-list { flex: 1 1 auto; max-height: none; min-height: 0; overflow: hidden; }
-    :host([collapsible]) machine-list[collapsed],
-    :host([collapsible]) project-list[collapsed],
-    :host([collapsible]) workspace-list[collapsed],
-    :host([collapsible]) session-list[collapsed] { flex: 0 0 auto; min-height: auto; overflow: hidden; }
+    machine-list[collapsed],
+    project-list[collapsed],
+    workspace-list[collapsed],
+    session-list[collapsed] { flex: 0 0 auto; min-height: auto; overflow: hidden; }
+    :host([compact]) machine-list,
+    :host([compact]) project-list,
+    :host([compact]) workspace-list,
+    :host([compact]) session-list { flex: 1 1 auto; max-height: none; min-height: 0; overflow: hidden; }
+    :host([compact]) machine-list[collapsed],
+    :host([compact]) project-list[collapsed],
+    :host([compact]) workspace-list[collapsed],
+    :host([compact]) session-list[collapsed] { flex: 0 0 auto; min-height: auto; overflow: hidden; }
     button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
   `;
 }
