@@ -14,20 +14,32 @@ export interface ShortcutKeyEvent {
 
 export class KeyboardShortcutDispatcher {
   private pendingTokens: string[] = [];
-  private pendingTimer: number | undefined;
+  private pendingTimer: ReturnType<typeof setTimeout> | undefined;
 
   handle(event: ShortcutKeyEvent, actions: AppAction[]): boolean {
     const token = eventToken(event);
-    if (token === undefined || !isModifiedShortcut(token)) return false;
+    if (token === undefined) return false;
 
     const shortcuts = actions
       .filter((action) => action.shortcut !== undefined && action.enabled !== false)
       .map((action) => ({ action, tokens: normalizeShortcut(action.shortcut ?? "") }))
       .filter((entry) => entry.tokens.length > 0);
 
-    const sequence = this.pendingTokens.length > 0 && !isModifiedShortcut(token)
-      ? [...this.pendingTokens, token]
-      : [token];
+    if (this.pendingTokens.length > 0) {
+      const handledPending = this.handleSequence([...this.pendingTokens, token], shortcuts);
+      if (handledPending) return true;
+      this.clearPending();
+      if (!isModifiedShortcut(token)) return false;
+    } else if (!isModifiedShortcut(token)) return false;
+
+    return this.handleSequence([token], shortcuts);
+  }
+
+  reset(): void {
+    this.clearPending();
+  }
+
+  private handleSequence(sequence: string[], shortcuts: { action: AppAction; tokens: string[] }[]): boolean {
     const exact = shortcuts.find((entry) => sameTokens(entry.tokens, sequence));
     if (exact !== undefined) {
       this.clearPending();
@@ -41,18 +53,13 @@ export class KeyboardShortcutDispatcher {
       return true;
     }
 
-    this.clearPending();
     return false;
-  }
-
-  reset(): void {
-    this.clearPending();
   }
 
   private setPending(tokens: string[]): void {
     this.clearPending();
     this.pendingTokens = tokens;
-    this.pendingTimer = window.setTimeout(() => {
+    this.pendingTimer = globalThis.setTimeout(() => {
       this.pendingTokens = [];
       this.pendingTimer = undefined;
     }, sequenceTimeoutMs);
@@ -61,7 +68,7 @@ export class KeyboardShortcutDispatcher {
   private clearPending(): void {
     this.pendingTokens = [];
     if (this.pendingTimer !== undefined) {
-      window.clearTimeout(this.pendingTimer);
+      globalThis.clearTimeout(this.pendingTimer);
       this.pendingTimer = undefined;
     }
   }

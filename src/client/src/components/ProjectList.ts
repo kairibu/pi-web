@@ -4,11 +4,12 @@ import type { Project, Workspace, WorkspaceActivity } from "../api";
 import { projectActivityIndicator } from "../workspaceActivity";
 import { actionMenuPanelStyle } from "./actionMenu";
 import { renderActionActivityIndicator } from "./activityBadge";
-import { activateSelectableRow, activateSelectableRowFromKeyboard } from "./selectableRow";
+import type { KeyboardNavigableSection } from "./navigationFocus";
+import { activateSelectableRow, focusSelectedOrFirstSelectableRow, handleSelectableRowKeyboard } from "./selectableRow";
 import { listStyles } from "./shared";
 
 @customElement("project-list")
-export class ProjectList extends LitElement {
+export class ProjectList extends LitElement implements KeyboardNavigableSection {
   @property({ attribute: false }) projects: Project[] = [];
   @property({ attribute: false }) selected?: Project;
   @property({ attribute: false }) activities: Record<string, WorkspaceActivity> = {};
@@ -18,6 +19,9 @@ export class ProjectList extends LitElement {
   @property({ attribute: false }) onSelect?: (project: Project) => void;
   @property({ attribute: false }) onClose?: (project: Project) => void;
   @property({ attribute: false }) onToggleCollapsed?: () => void;
+  @property({ attribute: false }) onFocusPreviousSection?: () => void | Promise<void>;
+  @property({ attribute: false }) onFocusNextSection?: () => void | Promise<void>;
+  @property({ attribute: false }) onCancelKeyboardNavigation?: () => void | Promise<void>;
   @state() private openMenuProjectId: string | undefined;
   @state() private menuStyle = "";
   private readonly onDocumentClick = (event: MouseEvent) => {
@@ -40,6 +44,11 @@ export class ProjectList extends LitElement {
     if (changed.has("collapsed") && this.collapsed) this.openMenuProjectId = undefined;
   }
 
+  async focusSelectedOrFirst(): Promise<boolean> {
+    await this.updateComplete;
+    return focusSelectedOrFirstSelectableRow(this.renderRoot, { fallbackSelector: ".section-toggle" });
+  }
+
   override render() {
     return html`
       <section>
@@ -52,7 +61,7 @@ export class ProjectList extends LitElement {
                 tabindex="0"
                 title=${project.path}
                 @click=${(event: MouseEvent) => { activateSelectableRow(event, () => this.onSelect?.(project)); }}
-                @keydown=${(event: KeyboardEvent) => { activateSelectableRowFromKeyboard(event, () => this.onSelect?.(project)); }}
+                @keydown=${(event: KeyboardEvent) => { this.handleProjectKeydown(event, project); }}
               >
                 <div class="action-main">
                   <span class="action-name">${project.name}</span><small>${project.path}</small>
@@ -72,6 +81,15 @@ export class ProjectList extends LitElement {
         `}
       </section>
     `;
+  }
+
+  private handleProjectKeydown(event: KeyboardEvent, project: Project): void {
+    handleSelectableRowKeyboard(event, {
+      activate: () => this.onSelect?.(project),
+      previousSection: this.onFocusPreviousSection === undefined ? undefined : () => { void this.onFocusPreviousSection?.(); },
+      nextSection: this.onFocusNextSection === undefined ? undefined : () => { void this.onFocusNextSection?.(); },
+      cancel: this.onCancelKeyboardNavigation === undefined ? undefined : () => { void this.onCancelKeyboardNavigation?.(); },
+    });
   }
 
   private renderHeading() {

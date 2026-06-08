@@ -5,15 +5,18 @@ import { machineActivityIndicator } from "../workspaceActivity";
 import { actionMenuPanelStyle } from "./actionMenu";
 import { renderActivityIndicator } from "./activityBadge";
 import { canRemoveMachine } from "./MachineList";
+import type { KeyboardNavigableSection } from "./navigationFocus";
 
 @customElement("machine-switcher")
-export class MachineSwitcher extends LitElement {
+export class MachineSwitcher extends LitElement implements KeyboardNavigableSection {
   @property({ attribute: false }) machines: Machine[] = [];
   @property({ attribute: false }) selected?: Machine;
   @property({ attribute: false }) statuses: Record<string, MachineHealth> = {};
   @property({ attribute: false }) activities: Record<string, Record<string, WorkspaceActivity>> = {};
   @property({ attribute: false }) onSelect?: (machine: Machine) => void | Promise<void>;
   @property({ attribute: false }) onRemove?: (machine: Machine) => void | Promise<void>;
+  @property({ attribute: false }) onFocusNextSection?: () => void | Promise<void>;
+  @property({ attribute: false }) onCancelKeyboardNavigation?: () => void | Promise<void>;
   @state() private open = false;
   @state() private menuStyle = "";
   @state() private openActionsMachineId: string | undefined;
@@ -40,6 +43,12 @@ export class MachineSwitcher extends LitElement {
     if (changed.has("machines") && this.openActionsMachineId !== undefined && !this.machines.some((machine) => machine.id === this.openActionsMachineId)) this.openActionsMachineId = undefined;
   }
 
+  async focusSelectedOrFirst(): Promise<boolean> {
+    const button = this.switcherButton();
+    if (button === null) return false;
+    return await this.openMenuAndFocusOption(button);
+  }
+
   override render() {
     const selected = this.selectedMachine();
     if (selected === undefined) return null;
@@ -54,6 +63,7 @@ export class MachineSwitcher extends LitElement {
           aria-label=${`Machine: ${label}. Switch machine.`}
           aria-expanded=${String(this.open)}
           @click=${(event: MouseEvent) => { this.toggleMenu(event.currentTarget); }}
+          @keydown=${(event: KeyboardEvent) => { this.handleSwitcherButtonKeydown(event); }}
         >
           ${this.renderActivity(selected)}
           <span class="machine-switcher-text">
@@ -83,7 +93,9 @@ export class MachineSwitcher extends LitElement {
           type="button"
           class="machine-option-main"
           title=${machineTitle(machine)}
+          data-machine-id=${machine.id}
           @click=${() => { this.select(machine); }}
+          @keydown=${(event: KeyboardEvent) => { this.handleMachineOptionKeydown(event); }}
         >
           <span class="machine-option-name">${this.renderActivity(machine)}<span>${machine.name}</span></span>
           <small>${machine.kind === "local" ? "Local Pi Web" : machine.baseUrl ?? "Remote Pi Web"} · ${machineStatusLabel(status)}</small>
@@ -120,10 +132,118 @@ export class MachineSwitcher extends LitElement {
     return this.selected ?? this.machines.find((machine) => machine.id === "local") ?? this.machines[0];
   }
 
+  private switcherButton(): HTMLElement | null {
+    return this.renderRoot.querySelector<HTMLElement>(".machine-switcher-button");
+  }
+
+  private handleSwitcherButtonKeydown(event: KeyboardEvent): void {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.openMenuAndFocusOption(event.currentTarget);
+      return;
+    }
+    if (event.key === "ArrowRight" && this.onFocusNextSection !== undefined) {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.onFocusNextSection();
+      return;
+    }
+    if (event.key === "Escape" && this.onCancelKeyboardNavigation !== undefined) {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.onCancelKeyboardNavigation();
+    }
+  }
+
+  private handleMachineOptionKeydown(event: KeyboardEvent): void {
+    if (event.key === "ArrowUp") {
+      this.focusRelativeMachineOption(event.currentTarget, -1, event);
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      this.focusRelativeMachineOption(event.currentTarget, 1, event);
+      return;
+    }
+    if (event.key === "Home") {
+      this.focusIndexedMachineOption(0, event);
+      return;
+    }
+    if (event.key === "End") {
+      this.focusIndexedMachineOption(-1, event);
+      return;
+    }
+    if (event.key === "ArrowRight" && this.onFocusNextSection !== undefined) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.open = false;
+      void this.onFocusNextSection();
+      return;
+    }
+    if (event.key === "ArrowLeft" || event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      this.open = false;
+      void this.updateComplete.then(() => { this.focusSwitcherButton(); });
+    }
+  }
+
   private toggleMenu(target: EventTarget | null): void {
     this.menuStyle = machineSwitcherMenuStyle(target);
     this.open = !this.open;
     this.openActionsMachineId = undefined;
+  }
+
+  private focusSwitcherButton(): boolean {
+    const button = this.switcherButton();
+    if (button === null) return false;
+    button.focus();
+    return true;
+  }
+
+  private async openMenuAndFocusOption(target: EventTarget | null): Promise<boolean> {
+    this.menuStyle = machineSwitcherMenuStyle(target);
+    this.open = true;
+    this.openActionsMachineId = undefined;
+    await this.updateComplete;
+    return this.focusSelectedMachineOption();
+  }
+
+  private focusSelectedMachineOption(): boolean {
+    const selected = this.renderRoot.querySelector<HTMLElement>(".machine-option.selected .machine-option-main");
+    const first = this.machineOptionButtons()[0];
+    const target = selected ?? first;
+    if (target === undefined) return false;
+    target.focus();
+    target.scrollIntoView({ block: "nearest" });
+    return true;
+  }
+
+  private focusRelativeMachineOption(target: EventTarget | null, delta: number, event: KeyboardEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    const buttons = this.machineOptionButtons();
+    if (buttons.length === 0 || !(target instanceof HTMLElement)) return;
+    const index = buttons.indexOf(target);
+    if (index < 0) return;
+    this.focusMachineOptionAt(index + delta);
+  }
+
+  private focusIndexedMachineOption(index: number, event: KeyboardEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.focusMachineOptionAt(index < 0 ? this.machineOptionButtons().length - 1 : index);
+  }
+
+  private focusMachineOptionAt(index: number): void {
+    const buttons = this.machineOptionButtons();
+    const target = buttons[Math.min(Math.max(index, 0), buttons.length - 1)];
+    target?.focus();
+    target?.scrollIntoView({ block: "nearest" });
+  }
+
+  private machineOptionButtons(): HTMLElement[] {
+    return Array.from(this.renderRoot.querySelectorAll<HTMLElement>(".machine-option-main"));
   }
 
   private toggleActionsMenu(machineId: string, target: EventTarget | null): void {

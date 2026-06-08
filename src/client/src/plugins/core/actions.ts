@@ -18,8 +18,8 @@ export function createCoreActions(): PluginAction[] {
       id: "prompt.focus",
       title: "Focus Prompt",
       description: "Move keyboard focus to the message composer",
+      shortcut: "mod+g c",
       group: "General",
-      enabled: (context) => context.state.selectedSession !== undefined,
       run: (context) => { context.focusPrompt(); },
     },
     {
@@ -99,7 +99,7 @@ export function createCoreActions(): PluginAction[] {
       title: "Go to Chat",
       shortcut: "mod+1",
       group: "Navigation",
-      run: (context) => { context.selectMainView("chat"); },
+      run: (context) => { context.focusPrompt(); },
     },
     {
       id: "view.files",

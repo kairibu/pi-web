@@ -5,12 +5,13 @@ import type { WorkspaceLabelItem } from "../plugins/types";
 import { workspaceActivityFor, workspaceActivityIndicator } from "../workspaceActivity";
 import { actionMenuPanelStyle } from "./actionMenu";
 import { renderActionActivityIndicator } from "./activityBadge";
-import { activateSelectableRow, activateSelectableRowFromKeyboard } from "./selectableRow";
+import type { KeyboardNavigableSection } from "./navigationFocus";
+import { activateSelectableRow, focusSelectedOrFirstSelectableRow, handleSelectableRowKeyboard } from "./selectableRow";
 import { listStyles } from "./shared";
 import { renderWorkspaceLabelInlineItems } from "./workspaceLabel";
 
 @customElement("workspace-list")
-export class WorkspaceList extends LitElement {
+export class WorkspaceList extends LitElement implements KeyboardNavigableSection {
   @property({ attribute: false }) workspaces: Workspace[] = [];
   @property({ attribute: false }) selected?: Workspace;
   @property({ type: Boolean, reflect: true }) collapsible = false;
@@ -21,6 +22,9 @@ export class WorkspaceList extends LitElement {
   @property({ attribute: false }) onSelect?: (workspace: Workspace) => void;
   @property({ attribute: false }) onDelete?: (workspace: Workspace) => void;
   @property({ attribute: false }) onToggleCollapsed?: () => void;
+  @property({ attribute: false }) onFocusPreviousSection?: () => void | Promise<void>;
+  @property({ attribute: false }) onFocusNextSection?: () => void | Promise<void>;
+  @property({ attribute: false }) onCancelKeyboardNavigation?: () => void | Promise<void>;
   @state() private openMenuWorkspaceId: string | undefined;
   @state() private menuStyle = "";
 
@@ -43,6 +47,11 @@ export class WorkspaceList extends LitElement {
     if (changed.has("workspaces") && this.openMenuWorkspaceId !== undefined && !this.workspaces.some((workspace) => workspace.id === this.openMenuWorkspaceId)) this.openMenuWorkspaceId = undefined;
     if (changed.has("collapsed") && this.collapsed) this.openMenuWorkspaceId = undefined;
     if ((changed.has("selected") || changed.has("workspaces") || changed.has("collapsed")) && !this.collapsed) this.scrollSelectedIntoView();
+  }
+
+  async focusSelectedOrFirst(): Promise<boolean> {
+    await this.updateComplete;
+    return focusSelectedOrFirstSelectableRow(this.renderRoot, { fallbackSelector: ".section-toggle" });
   }
 
   override render() {
@@ -182,7 +191,12 @@ export class WorkspaceList extends LitElement {
       this.openMenuWorkspaceId = undefined;
       return;
     }
-    activateSelectableRowFromKeyboard(event, () => this.onSelect?.(workspace));
+    handleSelectableRowKeyboard(event, {
+      activate: () => this.onSelect?.(workspace),
+      previousSection: this.onFocusPreviousSection === undefined ? undefined : () => { void this.onFocusPreviousSection?.(); },
+      nextSection: this.onFocusNextSection === undefined ? undefined : () => { void this.onFocusNextSection?.(); },
+      cancel: this.onCancelKeyboardNavigation === undefined ? undefined : () => { void this.onCancelKeyboardNavigation?.(); },
+    });
   }
 
   private scrollSelectedIntoView(): void {

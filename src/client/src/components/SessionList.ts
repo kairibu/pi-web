@@ -5,6 +5,7 @@ import { isCachedNewSessionInfo } from "../cachedNewSessions";
 import { isSessionActive } from "../../../shared/activity";
 import { actionMenuPanelStyle } from "./actionMenu";
 import { renderActionActivityIndicator } from "./activityBadge";
+import type { KeyboardNavigableSection } from "./navigationFocus";
 import { activateSelectableRow, focusSelectedOrFirstSelectableRow, handleSelectableRowKeyboard } from "./selectableRow";
 import { listStyles } from "./shared";
 
@@ -20,7 +21,7 @@ interface SessionRow {
 }
 
 @customElement("session-list")
-export class SessionList extends LitElement {
+export class SessionList extends LitElement implements KeyboardNavigableSection {
   @property({ attribute: false }) sessions: SessionInfo[] = [];
   @property({ attribute: false }) statuses: Record<string, SessionStatus> = {};
   @property({ attribute: false }) activities: Record<string, SessionActivity> = {};

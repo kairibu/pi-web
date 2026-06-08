@@ -66,4 +66,25 @@ describe("KeyboardShortcutDispatcher", () => {
     expect(dispatcher.handle(keyEvent("r", { ctrlKey: true, shiftKey: true }), [value])).toBe(true);
     expect(run).toHaveBeenCalledTimes(1);
   });
+
+  it("runs a shortcut sequence that starts with a modified key", () => {
+    const dispatcher = new KeyboardShortcutDispatcher();
+    const { value, run } = action("mod+g p");
+
+    expect(dispatcher.handle(keyEvent("g", { ctrlKey: true }), [value])).toBe(true);
+    expect(run).not.toHaveBeenCalled();
+    expect(dispatcher.handle(keyEvent("p"), [value])).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to a standalone modified shortcut when a pending sequence misses", () => {
+    const dispatcher = new KeyboardShortcutDispatcher();
+    const sequence = action("mod+g p");
+    const standalone = action("mod+k");
+
+    expect(dispatcher.handle(keyEvent("g", { ctrlKey: true }), [sequence.value, standalone.value])).toBe(true);
+    expect(dispatcher.handle(keyEvent("k", { ctrlKey: true }), [sequence.value, standalone.value])).toBe(true);
+    expect(sequence.run).not.toHaveBeenCalled();
+    expect(standalone.run).toHaveBeenCalledTimes(1);
+  });
 });

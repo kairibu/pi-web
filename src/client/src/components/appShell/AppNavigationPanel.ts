@@ -1,12 +1,17 @@
 import { LitElement, css, html } from "lit";
-import { customElement, property } from "lit/decorators.js";
+import { customElement, property, query } from "lit/decorators.js";
 import type { Machine, MachineHealth, Project, SessionActivity, SessionInfo, SessionStatus, Workspace, WorkspaceActivity } from "../../api";
 import type { WorkspaceLabelItem } from "../../plugins/types";
+import type { NavigationSection } from "../../appShell/navigationState";
+import { NAVIGATION_SECTION_ORDER } from "../../appShell/navigationState";
+import type { KeyboardNavigableSection } from "../navigationFocus";
 import "../MachineList";
 import "../MachineSwitcher";
 import "../ProjectList";
 import "../WorkspaceList";
 import "../SessionList";
+
+export type NavigationFocusTarget = NavigationSection | "chat";
 
 @customElement("app-navigation-panel")
 export class AppNavigationPanel extends LitElement {
@@ -53,6 +58,24 @@ export class AppNavigationPanel extends LitElement {
   @property({ attribute: false }) onArchivedCollapsed?: () => void | Promise<void>;
   @property({ attribute: false }) onSelectMachine?: (machine: Machine) => void | Promise<void>;
   @property({ attribute: false }) onRemoveMachine?: (machine: Machine) => void | Promise<void>;
+  @property({ attribute: false }) onFocusNavigationTarget?: (target: NavigationFocusTarget) => void | Promise<void>;
+  @property({ attribute: false }) onCancelKeyboardNavigation?: () => void | Promise<void>;
+
+  @query("machine-list") private machineList?: KeyboardNavigableSection;
+  @query("machine-switcher") private machineSwitcher?: KeyboardNavigableSection;
+  @query("project-list") private projectList?: KeyboardNavigableSection;
+  @query("workspace-list") private workspaceList?: KeyboardNavigableSection;
+  @query("session-list") private sessionList?: KeyboardNavigableSection;
+
+  async focusSection(section: NavigationSection): Promise<boolean> {
+    await this.updateComplete;
+    switch (section) {
+      case "machines": return await this.focusNavigableSection(this.compact ? this.machineList : this.machineSwitcher);
+      case "projects": return await this.focusNavigableSection(this.projectList);
+      case "workspaces": return await this.focusNavigableSection(this.workspaceList);
+      case "sessions": return await this.focusNavigableSection(this.sessionList);
+    }
+  }
 
   override render() {
     return html`
@@ -66,6 +89,8 @@ export class AppNavigationPanel extends LitElement {
             .activities=${this.machineActivities}
             .onSelect=${(machine: Machine) => this.onSelectMachine?.(machine)}
             .onRemove=${(machine: Machine) => this.onRemoveMachine?.(machine)}
+            .onFocusNextSection=${() => { this.focusNextFrom("machines"); }}
+            .onCancelKeyboardNavigation=${() => { this.cancelKeyboardNavigation(); }}
           ></machine-switcher>
         ` : null}
         <div class="header-actions">
@@ -84,6 +109,8 @@ export class AppNavigationPanel extends LitElement {
           .onToggleCollapsed=${() => { this.onToggleMachines?.(); }}
           .onSelect=${(machine: Machine) => this.onSelectMachine?.(machine)}
           .onRemove=${(machine: Machine) => this.onRemoveMachine?.(machine)}
+          .onFocusNextSection=${() => { this.focusNextFrom("machines"); }}
+          .onCancelKeyboardNavigation=${() => { this.cancelKeyboardNavigation(); }}
         ></machine-list>
       ` : null}
       <project-list
@@ -96,6 +123,9 @@ export class AppNavigationPanel extends LitElement {
         .onToggleCollapsed=${() => { this.onToggleProjects?.(); }}
         .onSelect=${(project: Project) => this.onSelectProject?.(project)}
         .onClose=${(project: Project) => this.onCloseProject?.(project)}
+        .onFocusPreviousSection=${() => { this.focusPreviousFrom("projects"); }}
+        .onFocusNextSection=${() => { this.focusNextFrom("projects"); }}
+        .onCancelKeyboardNavigation=${() => { this.cancelKeyboardNavigation(); }}
       ></project-list>
       <workspace-list
         .workspaces=${this.workspaces}
@@ -108,6 +138,9 @@ export class AppNavigationPanel extends LitElement {
         .onToggleCollapsed=${() => { this.onToggleWorkspaces?.(); }}
         .onSelect=${(workspace: Workspace) => this.onSelectWorkspace?.(workspace)}
         .onDelete=${(workspace: Workspace) => this.onDeleteWorkspace?.(workspace)}
+        .onFocusPreviousSection=${() => { this.focusPreviousFrom("workspaces"); }}
+        .onFocusNextSection=${() => { this.focusNextFrom("workspaces"); }}
+        .onCancelKeyboardNavigation=${() => { this.cancelKeyboardNavigation(); }}
       ></workspace-list>
       <session-list
         .sessions=${this.sessions}
@@ -126,8 +159,29 @@ export class AppNavigationPanel extends LitElement {
         .onRestore=${(session: SessionInfo) => this.onRestoreSession?.(session)}
         .onDelete=${(session: SessionInfo) => this.onDeleteCachedNewSession?.(session)}
         .onDetachParent=${(session: SessionInfo) => this.onDetachParentSession?.(session)}
+        .onFocusPreviousSection=${() => { this.focusPreviousFrom("sessions"); }}
+        .onFocusNextSection=${() => { this.focusNextFrom("sessions"); }}
+        .onCancelKeyboardNavigation=${() => { this.cancelKeyboardNavigation(); }}
       ></session-list>
     `;
+  }
+
+  private async focusNavigableSection(section: KeyboardNavigableSection | undefined): Promise<boolean> {
+    if (section === undefined) return false;
+    return await section.focusSelectedOrFirst();
+  }
+
+  private focusPreviousFrom(section: NavigationSection): void {
+    const target = previousVisibleNavigationTarget(section, this.machines);
+    if (target !== undefined) void this.onFocusNavigationTarget?.(target);
+  }
+
+  private focusNextFrom(section: NavigationSection): void {
+    void this.onFocusNavigationTarget?.(nextVisibleNavigationTarget(section, this.machines));
+  }
+
+  private cancelKeyboardNavigation(): void {
+    void this.onCancelKeyboardNavigation?.();
   }
 
   static override styles = css`
@@ -158,4 +212,18 @@ export class AppNavigationPanel extends LitElement {
 
 export function shouldShowMachinesSection(machines: readonly Machine[]): boolean {
   return machines.length > 1;
+}
+
+function previousVisibleNavigationTarget(section: NavigationSection, machines: readonly Machine[]): NavigationSection | undefined {
+  const sections = visibleNavigationSections(machines);
+  return sections[sections.indexOf(section) - 1];
+}
+
+function nextVisibleNavigationTarget(section: NavigationSection, machines: readonly Machine[]): NavigationFocusTarget {
+  const sections = visibleNavigationSections(machines);
+  return sections[sections.indexOf(section) + 1] ?? "chat";
+}
+
+function visibleNavigationSections(machines: readonly Machine[]): NavigationSection[] {
+  return NAVIGATION_SECTION_ORDER.filter((section) => section !== "machines" || shouldShowMachinesSection(machines));
 }
