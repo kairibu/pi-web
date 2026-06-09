@@ -17,7 +17,7 @@ import { registerTerminalProxyRoutes } from "./terminalProxyRoutes.js";
 import { registerWorkspaceDeletionRoutes } from "./workspaces/workspaceDeletionRoutes.js";
 import { registerConfigRoutes, type PiWebConfigService } from "./configRoutes.js";
 import { PiWebPluginService } from "./piWebPluginService.js";
-import { getPiWebStatus, getPiWebVersionStatus } from "./piWebStatus.js";
+import { getPiWebRuntime, getPiWebStatus, getPiWebVersionStatus } from "./piWebStatus.js";
 import { MachineService } from "./machines/machineService.js";
 import { registerMachineRoutes } from "./machines/machineRoutes.js";
 import { registerMachineProxyRoutes } from "./machines/machineProxyRoutes.js";
@@ -91,8 +91,11 @@ export async function buildApp(deps: AppDependencies = {}): Promise<FastifyInsta
   const projects = deps.projects ?? new ProjectService(new ProjectStore());
   const workspaces = deps.workspaces ?? new WorkspaceService();
   const piWebPlugins = deps.piWebPlugins ?? new PiWebPluginService();
-  const machines = deps.machines ?? new MachineService();
   const sessionDaemon = deps.sessionDaemon ?? new SessionDaemonClient();
+  const machines = deps.machines ?? new MachineService(undefined, {
+    localRuntime: () => getPiWebRuntime(sessionDaemon),
+    localStatus: () => getPiWebStatus(sessionDaemon),
+  });
 
   app.get("/pi-web-plugins/manifest.json", async () => piWebPlugins.manifest());
 
@@ -104,8 +107,9 @@ export async function buildApp(deps: AppDependencies = {}): Promise<FastifyInsta
     return reply.type(asset.contentType).send(asset.content);
   });
 
-  app.get("/api/pi-web/status", async () => getPiWebStatus());
-  app.get("/api/pi-web/version", async () => getPiWebVersionStatus());
+  app.get("/api/pi-web/status", async () => getPiWebStatus(sessionDaemon));
+  app.get("/api/pi-web/version", async () => getPiWebVersionStatus(sessionDaemon));
+  app.get("/api/pi-web/runtime", async () => getPiWebRuntime(sessionDaemon));
   app.get("/api/plugins", async () => piWebPlugins.plugins());
   registerConfigRoutes(app, deps.config);
 

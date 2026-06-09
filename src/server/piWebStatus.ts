@@ -5,8 +5,9 @@ import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DefaultPackageManager, getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
-import type { PiWebComponentStatus, PiWebInstallationInfo, PiWebReleaseStatus, PiWebServiceComponent, PiWebStatusMessage, PiWebStatusResponse, PiWebVersionResponse } from "../shared/apiTypes.js";
-import { parsePiWebComponentStatus } from "../shared/piWebStatusParsing.js";
+import type { PiWebCapability, PiWebComponentStatus, PiWebInstallationInfo, PiWebReleaseStatus, PiWebRuntimeComponent, PiWebRuntimeResponse, PiWebServiceComponent, PiWebStatusMessage, PiWebStatusResponse, PiWebVersionResponse } from "../shared/apiTypes.js";
+import { effectivePiWebCapabilities, WEB_RUNTIME_CAPABILITIES } from "../shared/capabilities.js";
+import { parsePiWebComponentStatus, parsePiWebRuntimeComponent } from "../shared/piWebStatusParsing.js";
 import { SessionDaemonClient } from "../sessiond/sessionDaemonClient.js";
 
 const PI_WEB_PACKAGE_NAME = "@jmfederico/pi-web";
@@ -61,9 +62,34 @@ interface PackageInfo {
   path: string;
 }
 
+interface PiWebStatusDaemon {
+  request(method: string, path: string, body?: unknown): Promise<{ statusCode: number; headers: Record<string, string>; body: string }>;
+}
+
 let latestReleaseCache: { checkedAtMs: number; latestVersion?: string; error?: string } | undefined;
 
 const runtimePackageInfo = readPackageInfoSync();
+
+export function getPiWebRuntimeComponent(component: PiWebServiceComponent, capabilities: readonly PiWebCapability[] = []): PiWebRuntimeComponent {
+  return {
+    component,
+    label: component === "web" ? "Web/UI" : "Session daemon",
+    runtimeVersion: runtimePackageInfo?.version ?? DEFAULT_VERSION,
+    available: true,
+    capabilities: [...capabilities],
+  };
+}
+
+export async function getPiWebRuntime(daemon: PiWebStatusDaemon = new SessionDaemonClient()): Promise<PiWebRuntimeResponse> {
+  const web = getPiWebRuntimeComponent("web", WEB_RUNTIME_CAPABILITIES);
+  const sessiond = await getSessiondRuntimeComponent(daemon);
+  return {
+    packageName: PI_WEB_PACKAGE_NAME,
+    generatedAt: new Date().toISOString(),
+    components: { web, sessiond },
+    capabilities: effectivePiWebCapabilities({ web, sessiond }),
+  };
+}
 
 export async function getPiWebComponentStatus(component: PiWebServiceComponent): Promise<PiWebComponentStatus> {
   const [installed, installation] = await Promise.all([
@@ -83,7 +109,7 @@ export async function getPiWebComponentStatus(component: PiWebServiceComponent):
   };
 }
 
-export async function getPiWebVersionStatus(daemon = new SessionDaemonClient()): Promise<PiWebVersionResponse> {
+export async function getPiWebVersionStatus(daemon: PiWebStatusDaemon = new SessionDaemonClient()): Promise<PiWebVersionResponse> {
   const [web, sessiond] = await Promise.all([
     getPiWebComponentStatus("web"),
     getSessiondComponentStatus(daemon),
@@ -95,7 +121,7 @@ export async function getPiWebVersionStatus(daemon = new SessionDaemonClient()):
   };
 }
 
-export async function getPiWebStatus(daemon = new SessionDaemonClient()): Promise<PiWebStatusResponse> {
+export async function getPiWebStatus(daemon: PiWebStatusDaemon = new SessionDaemonClient()): Promise<PiWebStatusResponse> {
   const versionStatus = await getPiWebVersionStatus(daemon);
   const { web, sessiond } = versionStatus.components;
   const release = await getLatestReleaseStatus(web.installedVersion ?? web.runtimeVersion ?? DEFAULT_VERSION);
@@ -214,19 +240,76 @@ function isSameOrWithin(parent: string, candidate: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !rel.startsWith(sep));
 }
 
-async function getSessiondComponentStatus(daemon: SessionDaemonClient): Promise<PiWebComponentStatus> {
+async function getSessiondRuntimeComponent(daemon: PiWebStatusDaemon): Promise<PiWebRuntimeComponent> {
   try {
-    const upstream = await daemon.request("GET", "/health");
+    const upstream = await daemon.request("GET", "/runtime");
     if (upstream.statusCode < 200 || upstream.statusCode >= 300) {
-      return unavailableSessiond(`health check returned HTTP ${String(upstream.statusCode)}`);
+      return await legacySessiondRuntimeComponent(daemon) ?? unavailableSessiondRuntime(`runtime check returned HTTP ${String(upstream.statusCode)}`);
     }
     const parsed: unknown = upstream.body === "" ? undefined : JSON.parse(upstream.body);
-    const version = isRecord(parsed) ? parsed["version"] : undefined;
-    const component = parsePiWebComponentStatus(version);
-    return component ?? unavailableSessiond("health response did not include version information");
+    const runtime = parsePiWebRuntimeComponent(parsed);
+    if (runtime !== undefined) return runtime;
+    const legacyVersion = isRecord(parsed) ? parsePiWebComponentStatus(parsed["version"]) : undefined;
+    if (legacyVersion !== undefined) return runtimeComponentFromStatus(legacyVersion);
+    return await legacySessiondRuntimeComponent(daemon) ?? unavailableSessiondRuntime("runtime response did not include valid runtime information");
+  } catch (error) {
+    return unavailableSessiondRuntime(error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function getSessiondComponentStatus(daemon: PiWebStatusDaemon): Promise<PiWebComponentStatus> {
+  try {
+    const upstream = await daemon.request("GET", "/runtime");
+    if (upstream.statusCode < 200 || upstream.statusCode >= 300) {
+      return await legacySessiondComponentStatus(daemon) ?? unavailableSessiond(`runtime check returned HTTP ${String(upstream.statusCode)}`);
+    }
+    const parsed: unknown = upstream.body === "" ? undefined : JSON.parse(upstream.body);
+    const legacyVersion = isRecord(parsed) ? parsePiWebComponentStatus(parsed["version"]) : undefined;
+    if (legacyVersion !== undefined) return legacyVersion;
+    const runtime = parsePiWebRuntimeComponent(parsed);
+    if (runtime?.available !== true) return await legacySessiondComponentStatus(daemon) ?? unavailableSessiond(runtime?.error ?? "runtime response did not include valid runtime information");
+    const status = await getPiWebComponentStatus("sessiond");
+    return { ...status, ...(runtime.runtimeVersion === undefined ? {} : { runtimeVersion: runtime.runtimeVersion }), available: true };
   } catch (error) {
     return unavailableSessiond(error instanceof Error ? error.message : String(error));
   }
+}
+
+async function legacySessiondRuntimeComponent(daemon: PiWebStatusDaemon): Promise<PiWebRuntimeComponent | undefined> {
+  const status = await legacySessiondComponentStatus(daemon);
+  return status === undefined ? undefined : runtimeComponentFromStatus(status);
+}
+
+async function legacySessiondComponentStatus(daemon: PiWebStatusDaemon): Promise<PiWebComponentStatus | undefined> {
+  try {
+    const upstream = await daemon.request("GET", "/health");
+    if (upstream.statusCode < 200 || upstream.statusCode >= 300) return undefined;
+    const parsed: unknown = upstream.body === "" ? undefined : JSON.parse(upstream.body);
+    return isRecord(parsed) ? parsePiWebComponentStatus(parsed["version"]) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function runtimeComponentFromStatus(status: PiWebComponentStatus): PiWebRuntimeComponent {
+  return {
+    component: status.component,
+    label: status.label,
+    ...(status.runtimeVersion === undefined ? {} : { runtimeVersion: status.runtimeVersion }),
+    available: status.available,
+    capabilities: [],
+    ...(status.error === undefined ? {} : { error: status.error }),
+  };
+}
+
+function unavailableSessiondRuntime(error: string): PiWebRuntimeComponent {
+  return {
+    component: "sessiond",
+    label: "Session daemon",
+    available: false,
+    capabilities: [],
+    error,
+  };
 }
 
 function unavailableSessiond(error: string): PiWebComponentStatus {

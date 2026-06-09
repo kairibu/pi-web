@@ -29,6 +29,8 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
   @property({ attribute: false }) activities: Record<string, SessionActivity> = {};
   @property({ attribute: false }) selected?: SessionInfo;
   @property({ type: Boolean }) canStart = false;
+  @property({ type: Boolean }) canDeleteArchived = false;
+  @property({ type: String }) archivedDeleteUnavailableMessage = "Update and restart Pi-Web on this machine to delete archived sessions.";
   @property({ type: Boolean, reflect: true }) collapsible = false;
   @property({ type: Boolean, reflect: true }) collapsed = false;
   @property({ attribute: false }) onSelect?: (session: SessionInfo) => void;
@@ -180,7 +182,7 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
       <div class="bulk-row selecting">
         <button ?disabled=${visibleSessions.length === 0} @click=${() => { this.toggleVisibleSelection(visibleSessions, !allVisibleSelected); }}>${allVisibleSelected ? "Clear visible" : "Select visible"}</button>
         <small>${selectedSessions.length} selected${visibleSelectedCount !== selectedSessions.length ? html` · ${visibleSelectedCount} visible` : null}</small>
-        <button class="danger" ?disabled=${selectedSessions.length === 0} @click=${() => { this.confirmDeleteSelectedArchived(); }}>Delete selected</button>
+        <button class="danger" title=${this.canDeleteArchived ? "Permanently delete selected archived sessions" : this.archivedDeleteUnavailableMessage} ?disabled=${selectedSessions.length === 0 || !this.canDeleteArchived} @click=${() => { this.confirmDeleteSelectedArchived(); }}>Delete selected</button>
         <button @click=${() => { this.clearSelection("archived"); }}>Clear</button>
         <button @click=${() => { this.closeSelection("archived"); }}>Done</button>
       </div>
@@ -215,7 +217,7 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
                 : session.archived === true
                   ? html`
                     <button title="Restore session" @click=${() => { this.openMenuSessionId = undefined; this.onRestore?.(session); }}>Restore</button>
-                    <button class="danger" title="Permanently delete archived session" @click=${() => { this.openMenuSessionId = undefined; this.confirmDeleteArchived(session); }}>Delete archived session</button>
+                    <button class="danger" title=${this.canDeleteArchived ? "Permanently delete archived session" : this.archivedDeleteUnavailableMessage} ?disabled=${!this.canDeleteArchived} @click=${() => { this.openMenuSessionId = undefined; this.confirmDeleteArchived(session); }}>Delete archived session</button>
                   `
                   : html`
                     ${session.parentSessionPath !== undefined ? html`<button title="Detach from parent" @click=${() => { this.openMenuSessionId = undefined; this.onDetachParent?.(session); }}>Detach from parent</button>` : null}
@@ -252,10 +254,12 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
   }
 
   private confirmDeleteArchived(session: SessionInfo): void {
+    if (!this.canDeleteArchived) return;
     if (confirm(`Permanently delete archived session “${sessionLabel(session)}”? This cannot be undone.`)) void this.onDeleteArchived?.(session);
   }
 
   private confirmDeleteSelectedArchived(): void {
+    if (!this.canDeleteArchived) return;
     const archived = this.selectedSessions("archived");
     if (archived.length === 0) return;
     const noun = archived.length === 1 ? "archived session" : "archived sessions";

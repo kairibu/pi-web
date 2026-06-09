@@ -12,8 +12,9 @@ export class MachineController {
       const machines = await api.machines();
       const selectedMachine = await this.selectInitialMachine(machines, routeMachineId);
       const machineIds = new Set(machines.map((machine) => machine.id));
-      this.setState({ machines, selectedMachine, machineActivities: filterKeys(this.getState().machineActivities, machineIds) });
+      this.setState({ machines, selectedMachine, machineActivities: filterKeys(this.getState().machineActivities, machineIds), machineRuntimes: filterKeys(this.getState().machineRuntimes, machineIds) });
       void this.refreshMachineHealthFor(machines);
+      void this.refreshMachineRuntimeFor(machines);
     } catch (error) {
       this.setState({ error: String(error) });
     } finally {
@@ -47,6 +48,7 @@ export class MachineController {
     if (options.updateUrl !== false) this.updateUrl();
     await this.projects.loadProjects();
     void this.refreshMachineHealth(machine.id);
+    void this.refreshMachineRuntime(machine.id);
   }
 
   async addMachine(input: { name: string; baseUrl: string; token?: string }): Promise<Machine | undefined> {
@@ -73,7 +75,7 @@ export class MachineController {
       await api.deleteMachine(machine.id);
       const machines = this.getState().machines.filter((candidate) => candidate.id !== machine.id);
       const local = machines.find((candidate) => candidate.id === "local") ?? machines[0];
-      this.setState({ machines, machineStatuses: omitKey(this.getState().machineStatuses, machine.id), machineActivities: omitKey(this.getState().machineActivities, machine.id) });
+      this.setState({ machines, machineStatuses: omitKey(this.getState().machineStatuses, machine.id), machineRuntimes: omitKey(this.getState().machineRuntimes, machine.id), machineActivities: omitKey(this.getState().machineActivities, machine.id) });
       if (wasSelected && local !== undefined) {
         if (options.selectFallback === false) return local;
         await this.selectMachine(local);
@@ -90,6 +92,15 @@ export class MachineController {
     try {
       const health = await api.health(machineId);
       this.setState({ machineStatuses: { ...this.getState().machineStatuses, [health.machineId]: health } });
+    } catch (error) {
+      this.setState({ error: String(error) });
+    }
+  }
+
+  async refreshMachineRuntime(machineId = this.getState().selectedMachine?.id ?? "local"): Promise<void> {
+    try {
+      const runtime = await api.runtime(machineId);
+      this.setState({ machineRuntimes: { ...this.getState().machineRuntimes, [runtime.machineId]: runtime } });
     } catch (error) {
       this.setState({ error: String(error) });
     }
@@ -132,6 +143,12 @@ export class MachineController {
     const results = await Promise.allSettled(machines.map((machine) => api.health(machine.id)));
     const health = Object.fromEntries(results.flatMap((result) => result.status === "fulfilled" ? [[result.value.machineId, result.value] as const] : []));
     if (Object.keys(health).length > 0) this.setState({ machineStatuses: { ...this.getState().machineStatuses, ...health } });
+  }
+
+  private async refreshMachineRuntimeFor(machines: Machine[]): Promise<void> {
+    const results = await Promise.allSettled(machines.map((machine) => api.runtime(machine.id)));
+    const runtimes = Object.fromEntries(results.flatMap((result) => result.status === "fulfilled" ? [[result.value.machineId, result.value] as const] : []));
+    if (Object.keys(runtimes).length > 0) this.setState({ machineRuntimes: { ...this.getState().machineRuntimes, ...runtimes } });
   }
 }
 

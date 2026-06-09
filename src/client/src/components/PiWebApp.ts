@@ -4,6 +4,7 @@ import { configApi, piWebApi, terminalsApi, workspacesApi, type Machine, type Ma
 import type { AppAction } from "../actions";
 import { initialAppState, type AppState } from "../appState";
 import { isSessionActive } from "../../../shared/activity";
+import { PI_WEB_CAPABILITIES, supportsPiWebCapability } from "../../../shared/capabilities";
 import { ActivityController } from "../controllers/activityController";
 import { AuthController } from "../controllers/authController";
 import { FileExplorerController } from "../controllers/fileExplorerController";
@@ -847,6 +848,22 @@ export class PiWebApp extends LitElement {
     this.panelResize.resetPanels();
   }
 
+  private canDeleteArchivedSessions(): boolean {
+    const runtime = this.selectedMachineRuntime();
+    return runtime?.ok === true && supportsPiWebCapability(runtime, PI_WEB_CAPABILITIES.sessionsDeleteArchived);
+  }
+
+  private archivedDeleteUnavailableMessage(): string {
+    const machineName = this.state.selectedMachine?.name ?? "this machine";
+    const runtime = this.selectedMachineRuntime();
+    if (runtime?.ok === false && runtime.error !== undefined) return `Update and restart Pi-Web on ${machineName} to delete archived sessions. Runtime check failed: ${runtime.error}`;
+    return `Update and restart Pi-Web on ${machineName} to delete archived sessions.`;
+  }
+
+  private selectedMachineRuntime() {
+    return this.state.machineRuntimes[selectedMachineId(this.state)];
+  }
+
   private renderNavigationPanel() {
     return html`
       <app-navigation-panel
@@ -870,6 +887,8 @@ export class PiWebApp extends LitElement {
         .sessionActivities=${this.state.sessionActivities}
         .selectedSession=${this.state.selectedSession}
         .canStartSession=${!!this.state.selectedWorkspace}
+        .canDeleteArchivedSessions=${this.canDeleteArchivedSessions()}
+        .archivedDeleteUnavailableMessage=${this.archivedDeleteUnavailableMessage()}
         .collapsible=${true}
         .compact=${this.appShell.isMobileNavigationLayout}
         .projectsCollapsed=${this.navigationSections.isCollapsed("projects")}
@@ -1206,7 +1225,9 @@ export class PiWebApp extends LitElement {
       focusPrompt: () => { void this.focusChatComposer(); },
       addProject: () => { this.setState({ projectDialogOpen: true }); },
       addMachine: () => { this.openMachineDialog(); },
-      refreshSelectedMachine: () => this.machines.refreshMachineHealth(),
+      refreshSelectedMachine: async () => {
+        await Promise.all([this.machines.refreshMachineHealth(), this.machines.refreshMachineRuntime()]);
+      },
       removeSelectedMachine: () => this.removeMachine(),
       openSelectedMachine: () => { this.openSelectedMachine(); },
       configureAuth: () => this.auth.openLogin(),

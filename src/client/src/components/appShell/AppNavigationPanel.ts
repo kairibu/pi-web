@@ -39,6 +39,8 @@ export class AppNavigationPanel extends LitElement {
   @property({ type: Boolean }) workspacesCollapsed = false;
   @property({ type: Boolean }) sessionsCollapsed = false;
   @property({ type: Boolean }) canStartSession = false;
+  @property({ type: Boolean }) canDeleteArchivedSessions = false;
+  @property({ type: String }) archivedDeleteUnavailableMessage = "Update and restart Pi-Web on this machine to delete archived sessions.";
   @property({ attribute: false }) onShowActions?: () => void;
   @property({ attribute: false }) onToggleMachines?: () => void;
   @property({ attribute: false }) onToggleProjects?: () => void;
@@ -151,6 +153,8 @@ export class AppNavigationPanel extends LitElement {
         .activities=${this.sessionActivities}
         .selected=${this.selectedSession}
         .canStart=${this.canStartSession}
+        .canDeleteArchived=${this.canDeleteArchivedSessions}
+        .archivedDeleteUnavailableMessage=${this.archivedDeleteUnavailableMessage}
         .collapsible=${this.collapsible}
         .collapsed=${this.sessionsCollapsed}
         .onToggleCollapsed=${() => { this.onToggleSessions?.(); }}

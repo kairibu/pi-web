@@ -17,12 +17,14 @@ import {
   parseGitStatusResponse,
   parseMachine,
   parseMachineHealth,
+  parseMachineRuntime,
   parseMachinesResponse,
   parseMessagePage,
   parseModelSelectionResponse,
   parseOAuthFlowState,
   parsePiWebConfigResponse,
   parsePiWebPluginsResponse,
+  parsePiWebRuntimeResponse,
   parsePiWebStatusResponse,
   parseProject,
   parseRestored,
@@ -42,6 +44,7 @@ const machinePrefix = (machineId = "local") => `/api/machines/${encodeURICompone
 
 export const piWebApi = {
   piWebStatus: () => request("/api/pi-web/status", parsePiWebStatusResponse),
+  piWebRuntime: () => request("/api/pi-web/runtime", parsePiWebRuntimeResponse),
 };
 
 export const machinesApi = {
@@ -49,6 +52,7 @@ export const machinesApi = {
   addMachine: (input: { name: string; baseUrl: string; token?: string }) => request("/api/machines", parseMachine, { method: "POST", body: JSON.stringify(input) }),
   deleteMachine: (machineId: string) => request(`/api/machines/${encodeURIComponent(machineId)}`, (value) => value, { method: "DELETE" }),
   health: (machineId: string) => request(`/api/machines/${encodeURIComponent(machineId)}/health`, parseMachineHealth),
+  runtime: (machineId: string) => request(`/api/machines/${encodeURIComponent(machineId)}/runtime`, parseMachineRuntime),
 };
 
 export const configApi = {

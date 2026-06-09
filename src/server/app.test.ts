@@ -12,6 +12,7 @@ import { MachineService } from "./machines/machineService.js";
 import { MachineStore } from "./machines/machineStore.js";
 import { WorkspaceService } from "./workspaces/workspaceService.js";
 import type { SessionProxyDaemon } from "./sessiond/sessionProxyRoutes.js";
+import { PI_WEB_CAPABILITIES } from "../shared/capabilities.js";
 import { machineScopedPluginId } from "../shared/machinePluginIds.js";
 import { MAX_IMAGE_PREVIEW_BYTES } from "../shared/workspaceFiles.js";
 import type { Project, Workspace } from "./types.js";
@@ -46,6 +47,15 @@ beforeEach(async () => {
         release: { packageName: "@jmfederico/pi-web", updateAvailable: false },
         commands: { update: "", restart: "", restartSystemd: "", restartDev: "" },
         messages: [],
+      }),
+      localRuntime: () => Promise.resolve({
+        packageName: "@jmfederico/pi-web",
+        generatedAt: "2026-05-25T00:00:00.000Z",
+        components: {
+          web: { component: "web", label: "PI WEB", available: true, capabilities: [PI_WEB_CAPABILITIES.sessionsDeleteArchived] },
+          sessiond: { component: "sessiond", label: "PI WEB Session Daemon", available: true, capabilities: [PI_WEB_CAPABILITIES.sessionsDeleteArchived] },
+        },
+        capabilities: [PI_WEB_CAPABILITIES.sessionsDeleteArchived],
       }),
     }),
     sessionDaemon: fakeSessionDaemon(),
@@ -107,6 +117,31 @@ describe("buildApp", () => {
     expect(localHealth.json()).toMatchObject({ machineId: "local", ok: true, status: "online" });
     expect(remoteHealth.statusCode).toBe(200);
     expect(remoteHealth.json()).toMatchObject({ machineId: remote.id, ok: true, status: "online" });
+  });
+
+  it("reports effective machine runtime capabilities for remote machines", async () => {
+    const addResponse = await app.inject({ method: "POST", url: "/api/machines", payload: { name: "Remote", baseUrl: "https://remote.example.test/" } });
+    const remote = addResponse.json<{ id: string }>();
+    const requestJson = vi.fn<MachineClient["requestJson"]>(() => Promise.resolve({
+      statusCode: 200,
+      headers: { "content-type": "application/json" },
+      body: {
+        packageName: "@jmfederico/pi-web",
+        generatedAt: "2026-05-25T00:00:00.000Z",
+        components: {
+          web: { component: "web", label: "Remote Web", runtimeVersion: "1.0.0", available: true, capabilities: [PI_WEB_CAPABILITIES.sessionsDeleteArchived] },
+          sessiond: { component: "sessiond", label: "Remote Sessiond", runtimeVersion: "1.0.0", available: true, capabilities: [PI_WEB_CAPABILITIES.sessionsDeleteArchived] },
+        },
+        capabilities: [PI_WEB_CAPABILITIES.sessionsDeleteArchived],
+      },
+    }));
+    remoteClient = fakeRemoteClient({ requestJson });
+
+    const runtime = await app.inject({ method: "GET", url: `/api/machines/${remote.id}/runtime` });
+
+    expect(runtime.statusCode).toBe(200);
+    expect(runtime.json()).toMatchObject({ machineId: remote.id, ok: true, capabilities: [PI_WEB_CAPABILITIES.sessionsDeleteArchived] });
+    expect(requestJson).toHaveBeenCalledWith("GET", "/api/pi-web/runtime", undefined, { timeoutMs: 3000 });
   });
 
   it("proxies allowlisted remote HTTP routes through the selected machine", async () => {

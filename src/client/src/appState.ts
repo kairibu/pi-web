@@ -1,4 +1,4 @@
-import type { AuthProviderOption, CommandOption, CommandResult, FileContentResponse, FileTreeEntry, GitDiffResponse, GitStatusResponse, Machine, MachineHealth, OAuthFlowState, PiWebStatusResponse, Project, SessionActivity, SessionInfo, SessionStatus, TerminalCommandRun, Workspace, WorkspaceActivity } from "./api";
+import type { AuthProviderOption, CommandOption, CommandResult, FileContentResponse, FileTreeEntry, GitDiffResponse, GitStatusResponse, Machine, MachineHealth, MachineRuntime, OAuthFlowState, PiWebStatusResponse, Project, SessionActivity, SessionInfo, SessionStatus, TerminalCommandRun, Workspace, WorkspaceActivity } from "./api";
 import type { ChatLine } from "./components/shared";
 import type { QualifiedContributionId } from "./plugins/ids";
 
@@ -7,6 +7,7 @@ export interface AppState {
   selectedMachine: Machine | undefined;
   isLoadingMachines: boolean;
   machineStatuses: Record<string, MachineHealth>;
+  machineRuntimes: Record<string, MachineRuntime>;
   projects: Project[];
   workspaces: Workspace[];
   sessions: SessionInfo[];
@@ -102,6 +103,7 @@ export function initialAppState(): AppState {
     selectedMachine: undefined,
     isLoadingMachines: false,
     machineStatuses: {},
+    machineRuntimes: {},
     projects: [],
     workspaces: [],
     sessions: [],

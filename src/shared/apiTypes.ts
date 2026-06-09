@@ -1,6 +1,12 @@
 export type MachineKind = "local" | "remote";
 export type MachineStatus = "unknown" | "online" | "offline" | "error";
 
+export const PI_WEB_CAPABILITIES = {
+  sessionsDeleteArchived: "sessions.deleteArchived",
+} as const;
+
+export type PiWebCapability = typeof PI_WEB_CAPABILITIES[keyof typeof PI_WEB_CAPABILITIES];
+
 export interface Machine {
   id: string;
   name: string;
@@ -19,6 +25,17 @@ export interface MachineHealth {
   status?: MachineStatus;
   web?: PiWebComponentStatus;
   sessiond?: PiWebComponentStatus;
+  error?: string;
+}
+
+export interface MachineRuntime {
+  machineId: string;
+  ok: boolean;
+  checkedAt: string;
+  packageName?: string;
+  generatedAt?: string;
+  components?: PiWebRuntimeResponse["components"];
+  capabilities?: PiWebCapability[];
   error?: string;
 }
 
@@ -337,6 +354,15 @@ export interface PiWebComponentStatus {
   error?: string;
 }
 
+export interface PiWebRuntimeComponent {
+  component: PiWebServiceComponent;
+  label: string;
+  runtimeVersion?: string;
+  available: boolean;
+  capabilities: PiWebCapability[];
+  error?: string;
+}
+
 export interface PiWebReleaseStatus {
   packageName: string;
   latestVersion?: string;
@@ -361,6 +387,16 @@ export interface PiWebVersionResponse {
     web: PiWebComponentStatus;
     sessiond: PiWebComponentStatus;
   };
+}
+
+export interface PiWebRuntimeResponse {
+  packageName: string;
+  generatedAt: string;
+  components: {
+    web: PiWebRuntimeComponent;
+    sessiond: PiWebRuntimeComponent;
+  };
+  capabilities: PiWebCapability[];
 }
 
 export interface PiWebStatusResponse extends PiWebVersionResponse {

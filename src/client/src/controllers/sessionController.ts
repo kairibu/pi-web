@@ -8,6 +8,7 @@ import { ChatTranscriptStore } from "../chatTranscriptStore";
 import { isShellInput } from "../inputModes";
 import { SessionSocket, type GlobalSessionEvent, type SessionUiEvent } from "../sessionSocket";
 import { isSessionActive } from "../../../shared/activity";
+import { PI_WEB_CAPABILITIES, supportsPiWebCapability } from "../../../shared/capabilities";
 import { InMemorySessionSelectionMemory, markSessionArchived, markSessionsArchived, selectPreferredSession, selectionAfterArchivingSession, selectionAfterArchivingSessions, shouldDeselectAfterArchivedCollapse, type SessionSelectionMemory } from "./sessionSelection";
 import { selectedMachineId, type GetState, type SetState, type UpdateUrl } from "./types";
 
@@ -288,6 +289,11 @@ export class SessionController {
     if (candidates.length === 0) return;
 
     const machineId = selectedMachineId(this.getState());
+    const runtime = this.getState().machineRuntimes[machineId];
+    if (runtime?.ok !== true || !supportsPiWebCapability(runtime, PI_WEB_CAPABILITIES.sessionsDeleteArchived)) {
+      this.setState({ error: "Deleting archived sessions requires an updated Pi-Web runtime on this machine." });
+      return;
+    }
     const results = await Promise.allSettled(candidates.map(async (session) => {
       await this.api.deleteArchived(session.id, machineId);
       return session.id;

@@ -22,6 +22,7 @@ export function registerSessionProxyRoutes(app: FastifyInstance, daemon: Session
   };
 
   app.get(`${prefix}/sessiond/health`, (_request, reply) => proxy({ method: "GET", url: `${prefix}/health` }, reply));
+  app.get(`${prefix}/sessiond/runtime`, (_request, reply) => proxy({ method: "GET", url: `${prefix}/runtime` }, reply));
 
   app.get<{ Params: { sessionId: string } }>(`${prefix}/sessions/:sessionId/events`, { websocket: true }, (socket, request) => {
     bridgeSockets(socket, daemon.connectWebSocket(`/sessions/${request.params.sessionId}/events`));
