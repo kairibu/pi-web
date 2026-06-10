@@ -1,5 +1,8 @@
-export function sessionEvents(sessionId: string, machineId = "local"): WebSocket {
-  return new WebSocket(`${webSocketBaseUrl()}${machinePrefix(machineId)}/sessions/${sessionId}/events`);
+import type { SessionRef } from "../../../shared/apiTypes";
+
+export function sessionEvents(session: SessionRef, machineId = "local"): WebSocket {
+  const query = new URLSearchParams({ cwd: session.cwd }).toString();
+  return new WebSocket(`${webSocketBaseUrl()}${machinePrefix(machineId)}/sessions/${encodeURIComponent(session.id)}/events?${query}`);
 }
 
 export function globalSessionEvents(machineId = "local"): WebSocket {

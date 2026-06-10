@@ -1,3 +1,5 @@
+import type { SessionRef } from "../../../shared/apiTypes";
+
 export function gitDiffUrl(projectId: string, workspaceId: string, options?: { path?: string; staged?: boolean }): string {
   const params = new URLSearchParams();
   if (options?.path !== undefined) params.set("path", options.path);
@@ -14,12 +16,11 @@ export function machineGitDiffUrl(machineId: string, projectId: string, workspac
   return `/api/machines/${encodeURIComponent(machineId)}/projects/${encodeURIComponent(projectId)}/workspaces/${encodeURIComponent(workspaceId)}/git/diff${query ? `?${query}` : ""}`;
 }
 
-export function messageUrl(sessionId: string, options?: { limit?: number; before?: number }, machineId = "local"): string {
-  const params = new URLSearchParams();
+export function messageUrl(session: SessionRef, options?: { limit?: number; before?: number }, machineId = "local"): string {
+  const params = new URLSearchParams({ cwd: session.cwd });
   if (options?.limit !== undefined) params.set("limit", String(options.limit));
   if (options?.before !== undefined) params.set("before", String(options.before));
-  const query = params.toString();
-  return `/api/machines/${encodeURIComponent(machineId)}/sessions/${sessionId}/messages${query ? `?${query}` : ""}`;
+  return `/api/machines/${encodeURIComponent(machineId)}/sessions/${encodeURIComponent(session.id)}/messages?${params.toString()}`;
 }
 
 export function workspaceImagePreviewUrl(projectId: string, workspaceId: string, path: string, options?: { modifiedAt?: string; machineId?: string }): string {

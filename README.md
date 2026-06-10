@@ -272,6 +272,8 @@ Environment variables:
 - `PI_WEB_SESSIOND_URL` — daemon URL used by the web process when connecting over TCP, for example `http://127.0.0.1:3001`. If you set `PI_WEB_SESSIOND_PORT`, set this for the web process too.
 - `PI_WEB_PROJECTS_FILE` — optional override for the projects storage JSON file. Defaults to `$PI_WEB_DATA_DIR/projects.json`.
 - `PI_WEB_MACHINES_FILE` — optional override for the remote machine registry JSON file. Defaults to `$PI_WEB_DATA_DIR/machines.json`.
+- `PI_CODING_AGENT_SESSION_DIR` — Pi session storage directory. PI WEB follows the same session-location priority as Pi for web sessions: this environment variable, then `sessionDir` in Pi settings for the selected workspace, then Pi's default session directory.
+- `PI_CODING_AGENT_DIR` — Pi agent config directory. PI WEB uses this for Pi auth, settings, resources, and default session storage, matching Pi's own configuration layout.
 
 ## Development services
 

@@ -13,7 +13,7 @@ import {
   type CreateAgentSessionRuntimeFactory,
   type EditToolDetails,
 } from "@earendil-works/pi-coding-agent";
-import type { ClientArchiveSessionsResponse, ClientCommand, ClientCommandResult, ClientMessagePage, ClientSession, ClientSessionModel, ClientSessionStatus, ClientThinkingLevel, SessionUiEvent } from "../types.js";
+import type { ClientArchiveSessionsResponse, ClientCommand, ClientCommandResult, ClientMessagePage, ClientSession, ClientSessionModel, ClientSessionRef, ClientSessionStatus, ClientThinkingLevel, SessionUiEvent } from "../types.js";
 import { pageMessagesAtSafeBoundary } from "./messagePaging.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
 import { BUILTIN_COMMANDS } from "./builtinCommands.js";
@@ -24,6 +24,7 @@ import type { ActiveSession } from "./sessionRuntimeStore.js";
 import type { AuthChange } from "./authService.js";
 import { fallbackSessionName, generateShortSessionName } from "./sessionNameGenerator.js";
 import { computeEditPreview, type EditPreviewResult } from "./editPreview.js";
+import { createPiSessionManagerGateway } from "./piSessionManagerGateway.js";
 import type { WorkspaceActivityService } from "../activity/workspaceActivityService.js";
 
 function noop(): void {
@@ -34,6 +35,18 @@ function authLossWarningKey(sessionId: string, provider: string, modelId: string
   return `${sessionId}:${provider}/${modelId}`;
 }
 
+function sessionIdFromLookup(ref: PiSessionLookup): string {
+  return typeof ref === "string" ? ref : ref.id;
+}
+
+function isPiSessionRef(ref: PiSessionLookup): ref is PiSessionRef {
+  return typeof ref !== "string";
+}
+
+function lookupMatchesActiveSession(ref: PiSessionLookup, active: ActiveSession<PiSessionRuntime>): boolean {
+  return !isPiSessionRef(ref) || active.runtime.cwd === ref.cwd;
+}
+
 type QueuedPromptKind = "steer" | "followUp";
 
 interface QueuedPrompt {
@@ -42,7 +55,12 @@ interface QueuedPrompt {
 }
 
 type SessionArchiveRepository = Pick<SessionArchiveStore, "list" | "get" | "archive" | "restore" | "isArchived">;
-interface PiSessionListEntry {
+
+export type PiSessionRef = ClientSessionRef;
+
+type PiSessionLookup = string | PiSessionRef;
+
+export interface PiSessionListEntry {
   id: string;
   path: string;
   cwd: string;
@@ -74,7 +92,6 @@ export interface PiSessionManager {
 export interface PiSessionManagerGateway {
   list(cwd: string): Promise<PiSessionListEntry[]>;
   create(cwd: string): PiSessionManager;
-  listAll(): Promise<PiSessionListEntry[]>;
   open(path: string): PiSessionManager;
 }
 
@@ -201,7 +218,7 @@ export class PiSessionService {
   constructor(private readonly events: SessionEventHub, deps: PiSessionServiceDependencies = {}) {
     this.archiveStore = deps.archiveStore ?? new SessionArchiveStore();
     this.agentDir = deps.agentDir ?? getAgentDir();
-    this.sessionManager = deps.sessionManager ?? SessionManager;
+    this.sessionManager = deps.sessionManager ?? createPiSessionManagerGateway({ agentDir: this.agentDir });
     this.modelRegistry = deps.modelRegistry ?? ModelRegistry.create(AuthStorage.create());
     this.createRuntime = deps.createRuntime ?? createDefaultRuntimeFactory(this.modelRegistry.authStorage, this.modelRegistry);
     this.createAgentRuntime = deps.createAgentRuntime ?? defaultCreateAgentRuntime;
@@ -277,17 +294,17 @@ export class PiSessionService {
     };
   }
 
-  async messages(sessionId: string, page?: { before?: number; limit?: number }): Promise<unknown[] | ClientMessagePage> {
-    const session = await this.getOrOpen(sessionId);
+  async messages(ref: PiSessionLookup, page?: { before?: number; limit?: number }): Promise<unknown[] | ClientMessagePage> {
+    const session = await this.getOrOpen(ref);
     return pageMessagesAtSafeBoundary(historyMessages(session), page);
   }
 
-  async status(sessionId: string): Promise<ClientSessionStatus> {
-    return this.statusFromSession(await this.getOrOpen(sessionId));
+  async status(ref: PiSessionLookup): Promise<ClientSessionStatus> {
+    return this.statusFromSession(await this.getOrOpen(ref));
   }
 
-  async availableModels(sessionId: string): Promise<ClientSessionModel[]> {
-    const session = await this.getOrOpen(sessionId);
+  async availableModels(ref: PiSessionLookup): Promise<ClientSessionModel[]> {
+    const session = await this.getOrOpen(ref);
     session.modelRegistry.refresh();
     const models = session.scopedModels.length > 0
       ? session.scopedModels.map((scoped) => scoped.model)
@@ -295,9 +312,9 @@ export class PiSessionService {
     return models.map(modelToClientModel);
   }
 
-  async setModel(sessionId: string, provider: string, modelId: string): Promise<ClientSessionStatus> {
-    await this.assertWritable(sessionId);
-    const session = await this.getOrOpen(sessionId);
+  async setModel(ref: PiSessionLookup, provider: string, modelId: string): Promise<ClientSessionStatus> {
+    await this.assertWritable(ref);
+    const session = await this.getOrOpen(ref);
     session.modelRegistry.refresh();
     const candidates = session.scopedModels.length > 0
       ? session.scopedModels.map((scoped) => scoped.model)
@@ -311,9 +328,9 @@ export class PiSessionService {
     return this.statusFromSession(session);
   }
 
-  async cycleModel(sessionId: string, direction: "forward" | "backward"): Promise<ClientSessionStatus> {
-    await this.assertWritable(sessionId);
-    const session = await this.getOrOpen(sessionId);
+  async cycleModel(ref: PiSessionLookup, direction: "forward" | "backward"): Promise<ClientSessionStatus> {
+    await this.assertWritable(ref);
+    const session = await this.getOrOpen(ref);
     const result = await session.cycleModel(direction);
     if (result === undefined) throw new Error(session.scopedModels.length > 0 ? "Only one model in scope" : "Only one model available");
     this.publishActivity(session, `model: ${result.model.id}`, "idle", result.model.provider);
@@ -321,23 +338,23 @@ export class PiSessionService {
     return this.statusFromSession(session);
   }
 
-  async availableThinkingLevels(sessionId: string): Promise<ClientThinkingLevel[]> {
-    const session = await this.getOrOpen(sessionId);
+  async availableThinkingLevels(ref: PiSessionLookup): Promise<ClientThinkingLevel[]> {
+    const session = await this.getOrOpen(ref);
     return session.getAvailableThinkingLevels();
   }
 
-  async setThinkingLevel(sessionId: string, level: ClientThinkingLevel): Promise<ClientSessionStatus> {
-    await this.assertWritable(sessionId);
-    const session = await this.getOrOpen(sessionId);
+  async setThinkingLevel(ref: PiSessionLookup, level: ClientThinkingLevel): Promise<ClientSessionStatus> {
+    await this.assertWritable(ref);
+    const session = await this.getOrOpen(ref);
     session.setThinkingLevel(level);
     this.publishActivity(session, `thinking: ${session.thinkingLevel}`, "idle");
     this.publishStatus(session);
     return this.statusFromSession(session);
   }
 
-  async cycleThinkingLevel(sessionId: string): Promise<ClientSessionStatus> {
-    await this.assertWritable(sessionId);
-    const session = await this.getOrOpen(sessionId);
+  async cycleThinkingLevel(ref: PiSessionLookup): Promise<ClientSessionStatus> {
+    await this.assertWritable(ref);
+    const session = await this.getOrOpen(ref);
     const level = session.cycleThinkingLevel();
     if (level === undefined) throw new Error("Current model does not support thinking");
     this.publishActivity(session, `thinking: ${level}`, "idle");
@@ -345,8 +362,8 @@ export class PiSessionService {
     return this.statusFromSession(session);
   }
 
-  async commands(sessionId: string): Promise<ClientCommand[]> {
-    const session = await this.getOrOpen(sessionId);
+  async commands(ref: PiSessionLookup): Promise<ClientCommand[]> {
+    const session = await this.getOrOpen(ref);
     const commands: ClientCommand[] = [...BUILTIN_COMMANDS];
     for (const command of session.extensionRunner.getRegisteredCommands()) {
       commands.push({ name: command.invocationName, ...(command.description === undefined ? {} : { description: command.description }), source: "extension" });
@@ -360,9 +377,9 @@ export class PiSessionService {
     return commands.sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  async prompt(sessionId: string, text: string, streamingBehavior?: "steer" | "followUp"): Promise<void> {
-    await this.assertWritable(sessionId);
-    const session = await this.getOrOpen(sessionId);
+  async prompt(ref: PiSessionLookup, text: string, streamingBehavior?: "steer" | "followUp"): Promise<void> {
+    await this.assertWritable(ref);
+    const session = await this.getOrOpen(ref);
     this.maybeGenerateSessionName(session, text);
     const isQueued = session.isStreaming || session.isCompacting;
     const behavior = isQueued ? streamingBehavior ?? "followUp" : undefined;
@@ -398,9 +415,9 @@ export class PiSessionService {
     this.publishStatus(session);
   }
 
-  async shell(sessionId: string, text: string): Promise<void> {
-    await this.assertWritable(sessionId);
-    const active = await this.getActive(sessionId);
+  async shell(ref: PiSessionLookup, text: string): Promise<void> {
+    await this.assertWritable(ref);
+    const active = await this.getActive(ref);
     const { session } = active.runtime;
     const isExcluded = text.startsWith("!!");
     const command = (isExcluded ? text.slice(2) : text.slice(1)).trim();
@@ -433,26 +450,28 @@ export class PiSessionService {
     });
   }
 
-  async runCommand(sessionId: string, text: string): Promise<ClientCommandResult> {
-    await this.assertWritable(sessionId);
-    return this.commandService.run(sessionId, text);
+  async runCommand(ref: PiSessionLookup, text: string): Promise<ClientCommandResult> {
+    await this.assertWritable(ref);
+    const active = await this.getActive(ref);
+    return this.commandService.run(active.runtime.session.sessionId, text);
   }
 
-  async respondToCommand(sessionId: string, requestId: string, value: string): Promise<ClientCommandResult> {
-    await this.assertWritable(sessionId);
-    return this.commandService.respond(sessionId, requestId, value);
+  async respondToCommand(ref: PiSessionLookup, requestId: string, value: string): Promise<ClientCommandResult> {
+    await this.assertWritable(ref);
+    const active = await this.getActive(ref);
+    return this.commandService.respond(active.runtime.session.sessionId, requestId, value);
   }
 
-  async archive(sessionId: string): Promise<void> {
-    const session = await this.getOrOpen(sessionId);
+  async archive(ref: PiSessionLookup): Promise<void> {
+    const session = await this.getOrOpen(ref);
     if (this.hasActiveWork(session)) throw new Error("Stop current session activity before archiving");
     const archiveInput = await this.archiveInputForSession(session);
     await this.closeActive(session.sessionId);
     await this.archiveStore.archive(archiveInput);
   }
 
-  async archiveTree(sessionId: string): Promise<ClientArchiveSessionsResponse> {
-    const session = await this.getOrOpen(sessionId);
+  async archiveTree(ref: PiSessionLookup): Promise<ClientArchiveSessionsResponse> {
+    const session = await this.getOrOpen(ref);
     const catalog = await this.workspaceArchiveCandidates(session.sessionManager.getCwd());
     const root = findArchiveCandidateByIdOrPrefix(catalog, session.sessionId) ?? archiveCandidateFromActiveSession(session, false);
     const plan = planSessionArchiveTree(root, catalog);
@@ -471,21 +490,24 @@ export class PiSessionService {
     };
   }
 
-  async restore(sessionId: string): Promise<void> {
-    await this.closeActive(sessionId);
-    await this.archiveStore.restore(sessionId);
+  async restore(ref: PiSessionLookup): Promise<void> {
+    const archived = await this.getArchived(ref);
+    if (archived === undefined) throw new Error("Session not found");
+    await this.closeActive(archived.sessionId);
+    await this.archiveStore.restore(archived.sessionId);
   }
 
-  async detachParent(sessionId: string): Promise<void> {
-    const session = await this.getOrOpen(sessionId);
+  async detachParent(ref: PiSessionLookup): Promise<void> {
+    const session = await this.getOrOpen(ref);
     const sessionFile = session.sessionFile;
     if (sessionFile === undefined || sessionFile === "") throw new Error("Session is not persisted");
     await clearParentSession(sessionFile);
   }
 
-  async abort(sessionId: string): Promise<void> {
-    const active = this.active.get(sessionId);
-    if (!active) return;
+  async abort(ref: PiSessionLookup): Promise<void> {
+    const active = this.activeForLookup(ref);
+    if (active === undefined) return;
+    const sessionId = active.runtime.session.sessionId;
     this.clearCompactionPromptQueue(sessionId);
     clearSessionQueue(active.runtime.session);
     await active.runtime.session.abort();
@@ -493,8 +515,10 @@ export class PiSessionService {
     this.publishStatus(active.runtime.session);
   }
 
-  stop(sessionId: string): void {
-    void this.closeActive(sessionId).catch(() => {
+  stop(ref: PiSessionLookup): void {
+    const active = this.activeForLookup(ref);
+    if (active === undefined) return;
+    void this.closeActive(active.runtime.session.sessionId).catch(() => {
       // Best-effort shutdown; callers that need errors await closeActive directly.
     });
   }
@@ -591,24 +615,42 @@ export class PiSessionService {
     }
   }
 
-  private async assertWritable(sessionId: string): Promise<void> {
-    if (await this.archiveStore.isArchived(sessionId)) throw new Error("Archived sessions are read-only. Restore the session to continue.");
+  private async assertWritable(ref: PiSessionLookup): Promise<void> {
+    if (await this.getArchived(ref) !== undefined) throw new Error("Archived sessions are read-only. Restore the session to continue.");
   }
 
-  private async getOrOpen(sessionId: string): Promise<PiAgentSession> {
-    return (await this.getActive(sessionId)).runtime.session;
+  private async getOrOpen(ref: PiSessionLookup): Promise<PiAgentSession> {
+    return (await this.getActive(ref)).runtime.session;
   }
 
-  private async getActive(sessionId: string): Promise<ActiveSession<PiSessionRuntime>> {
-    const active = this.active.get(sessionId);
-    if (active) return active;
+  private async getActive(ref: PiSessionLookup): Promise<ActiveSession<PiSessionRuntime>> {
+    const active = this.activeForLookup(ref);
+    if (active !== undefined) return active;
 
-    const archived = await this.archiveStore.get(sessionId);
+    const archived = await this.getArchived(ref);
     if (archived?.archivePath !== undefined) return this.create(this.sessionManager.open(archived.archivePath), archived.cwd);
 
-    const match = (await this.sessionManager.listAll()).find((s) => s.id === sessionId || s.id.startsWith(sessionId));
+    if (!isPiSessionRef(ref)) throw new Error("Session not found");
+    const match = (await this.sessionManager.list(ref.cwd)).find((s) => s.id === ref.id || s.id.startsWith(ref.id));
     if (!match) throw new Error("Session not found");
     return this.create(this.sessionManager.open(match.path), match.cwd);
+  }
+
+  private async getArchived(ref: PiSessionLookup): Promise<ArchivedSessionRecord | undefined> {
+    const archived = await this.archiveStore.get(sessionIdFromLookup(ref));
+    if (archived === undefined) return undefined;
+    if (isPiSessionRef(ref) && archived.cwd !== ref.cwd) return undefined;
+    return archived;
+  }
+
+  private activeForLookup(ref: PiSessionLookup): ActiveSession<PiSessionRuntime> | undefined {
+    const sessionId = sessionIdFromLookup(ref);
+    const exact = this.active.get(sessionId);
+    if (exact !== undefined && lookupMatchesActiveSession(ref, exact)) return exact;
+    for (const [candidateId, active] of this.active.entries()) {
+      if (candidateId.startsWith(sessionId) && lookupMatchesActiveSession(ref, active)) return active;
+    }
+    return undefined;
   }
 
   private async create(sessionManager: PiSessionManager, cwd: string): Promise<ActiveSession<PiSessionRuntime>> {

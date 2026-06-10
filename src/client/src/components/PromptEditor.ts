@@ -173,8 +173,8 @@ export class PromptEditor extends LitElement {
       this.completions = [];
       return;
     }
-    if (trigger.kind === "command" && this.sessionId !== undefined && this.sessionId !== "") {
-      const commands = await api.commands(this.sessionId, this.machineId).catch(emptySlashCommands);
+    if (trigger.kind === "command" && this.sessionId !== undefined && this.sessionId !== "" && this.cwd !== undefined && this.cwd !== "") {
+      const commands = await api.commands({ id: this.sessionId, cwd: this.cwd }, this.machineId).catch(emptySlashCommands);
       if (version !== this.requestVersion) return;
       this.completions = commands
         .filter((command) => command.name.toLowerCase().includes(trigger.query.toLowerCase()))

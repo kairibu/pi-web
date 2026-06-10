@@ -43,6 +43,10 @@ function sessionRecord(id: string, cwd = "/workspace") {
   return { id, path: `/sessions/${id}.jsonl`, cwd, created: new Date("2026-01-01T00:00:00.000Z"), modified: new Date("2026-01-01T00:01:00.000Z"), messageCount: 0, firstMessage: "", allMessagesText: "" };
 }
 
+function sessionRef(id: string, cwd = "/workspace") {
+  return { id, cwd };
+}
+
 function fakeRuntime(sessionId = "session-1", patch: Partial<TestSession> = {}) {
   const promptCalls: { text: string; options: unknown }[] = [];
   const listeners: ((event: unknown) => void)[] = [];
@@ -122,7 +126,6 @@ function sessionGateway(records: ReturnType<typeof sessionRecord>[]): SessionGat
   return {
     create: () => fakeSessionManager(),
     list: () => Promise.resolve(records),
-    listAll: () => Promise.resolve(records),
     open: () => fakeSessionManager(),
   };
 }
@@ -174,7 +177,7 @@ describe("PiSessionService", () => {
         heartbeatIntervalMs: 1_000,
       });
 
-      await service.status("idle-session");
+      await service.status(sessionRef("idle-session"));
       hub.globalEvents.length = 0;
       listener?.({ type: "agent_start" });
 
@@ -209,7 +212,7 @@ describe("PiSessionService", () => {
       heartbeatIntervalMs: 60_000,
     });
 
-    await service.status("completion-session");
+    await service.status(sessionRef("completion-session"));
     hub.globalEvents.length = 0;
     listener?.({ type: "tool_execution_end", toolName: "read", isError: false });
 
@@ -235,7 +238,6 @@ describe("PiSessionService", () => {
           { ...sessionRecord("active"), messageCount: 1, firstMessage: "hello", allMessagesText: "hello" },
           { ...sessionRecord("archived"), messageCount: 2, firstMessage: "bye", allMessagesText: "bye" },
         ]),
-        listAll: () => Promise.resolve([]),
         open: () => fakeSessionManager(),
       },
       heartbeatIntervalMs: 60_000,
@@ -262,7 +264,6 @@ describe("PiSessionService", () => {
       sessionManager: {
         create: () => fakeSessionManager(),
         list: () => Promise.resolve([{ ...sessionRecord("active"), messageCount: 1, firstMessage: "hello", allMessagesText: "hello" }]),
-        listAll: () => Promise.resolve([]),
         open: () => fakeSessionManager(),
       },
       heartbeatIntervalMs: 60_000,
@@ -301,13 +302,12 @@ describe("PiSessionService", () => {
       sessionManager: {
         create: () => fakeSessionManager(),
         list: (cwd) => Promise.resolve(cwd === "/workspace" ? [root, directChild, archivedChild, grandchild] : [otherWorkspaceChild]),
-        listAll: () => Promise.resolve([root, directChild, archivedChild, grandchild, otherWorkspaceChild]),
         open: () => fakeSessionManager(),
       },
       heartbeatIntervalMs: 60_000,
     });
 
-    await expect(service.archiveTree("root")).resolves.toEqual({
+    await expect(service.archiveTree(sessionRef("root"))).resolves.toEqual({
       archived: true,
       sessionIds: ["root", "direct-child", "grandchild"],
       archivedCount: 3,
@@ -331,7 +331,6 @@ describe("PiSessionService", () => {
       sessionManager: {
         create: () => fakeSessionManager(),
         list: () => Promise.resolve([]),
-        listAll: () => Promise.resolve([]),
         open: () => fakeSessionManager(),
       },
       workspaceActivity: {
@@ -360,7 +359,7 @@ describe("PiSessionService", () => {
       heartbeatIntervalMs: 60_000,
     });
 
-    await service.prompt("prompt-session", "Build the thing");
+    await service.prompt(sessionRef("prompt-session"), "Build the thing");
 
     expect(fake.calls.prompt).toEqual([{ text: "Build the thing", options: undefined }]);
     await service.dispose();
@@ -379,7 +378,7 @@ describe("PiSessionService", () => {
       heartbeatIntervalMs: 60_000,
     });
 
-    await expect(service.status("status-session")).resolves.toMatchObject({
+    await expect(service.status(sessionRef("status-session"))).resolves.toMatchObject({
       pendingMessageCount: 2,
       queuedMessages: [{ kind: "steer", text: "adjust this turn" }, { kind: "followUp", text: "then do this" }],
       messageCount: 2,
@@ -399,7 +398,7 @@ describe("PiSessionService", () => {
       heartbeatIntervalMs: 60_000,
     });
 
-    await service.prompt("dedupe-session", "already queued", "followUp");
+    await service.prompt(sessionRef("dedupe-session"), "already queued", "followUp");
 
     expect(fake.calls.prompt).toEqual([]);
     await service.dispose();
@@ -414,7 +413,7 @@ describe("PiSessionService", () => {
       heartbeatIntervalMs: 60_000,
     });
 
-    await service.prompt("queued-session", "Wait for the current turn", "followUp");
+    await service.prompt(sessionRef("queued-session"), "Wait for the current turn", "followUp");
 
     expect(fake.calls.prompt).toEqual([{ text: "Wait for the current turn", options: { streamingBehavior: "followUp" } }]);
     expect(hub.sessionEvents.some(({ event }) => event.type === "message.append")).toBe(false);
@@ -439,12 +438,12 @@ describe("PiSessionService", () => {
       heartbeatIntervalMs: 60_000,
     });
 
-    await service.prompt("compacting-session", "Start task 1", "followUp");
-    await service.prompt("compacting-session", "Then task 2", "followUp");
+    await service.prompt(sessionRef("compacting-session"), "Start task 1", "followUp");
+    await service.prompt(sessionRef("compacting-session"), "Then task 2", "followUp");
 
     expect(fake.calls.prompt).toEqual([]);
     expect(hub.sessionEvents.some(({ event }) => event.type === "message.append")).toBe(false);
-    await expect(service.status("compacting-session")).resolves.toMatchObject({
+    await expect(service.status(sessionRef("compacting-session"))).resolves.toMatchObject({
       pendingMessageCount: 2,
       queuedMessages: [{ kind: "followUp", text: "Start task 1" }, { kind: "followUp", text: "Then task 2" }],
     });
@@ -455,7 +454,7 @@ describe("PiSessionService", () => {
 
     expect(fake.calls.prompt).toEqual([{ text: "Start task 1", options: undefined }]);
     expect(hub.sessionEvents.some(({ event }) => event.type === "message.append" && JSON.stringify(event.message).includes("Start task 1"))).toBe(true);
-    await expect(service.status("compacting-session")).resolves.toMatchObject({
+    await expect(service.status(sessionRef("compacting-session"))).resolves.toMatchObject({
       pendingMessageCount: 1,
       queuedMessages: [{ kind: "followUp", text: "Then task 2" }],
     });
@@ -467,7 +466,7 @@ describe("PiSessionService", () => {
       { text: "Start task 1", options: undefined },
       { text: "Then task 2", options: { streamingBehavior: "followUp" } },
     ]);
-    await expect(service.status("compacting-session")).resolves.toMatchObject({
+    await expect(service.status(sessionRef("compacting-session"))).resolves.toMatchObject({
       pendingMessageCount: 0,
       queuedMessages: [],
     });
@@ -483,8 +482,8 @@ describe("PiSessionService", () => {
       heartbeatIntervalMs: 60_000,
     });
 
-    await service.status("abort-session");
-    await service.abort("abort-session");
+    await service.status(sessionRef("abort-session"));
+    await service.abort(sessionRef("abort-session"));
 
     expect(fake.calls.clearQueue).toBe(1);
     expect(fake.calls.abort).toBe(1);
@@ -499,13 +498,13 @@ describe("PiSessionService", () => {
       heartbeatIntervalMs: 60_000,
     });
 
-    await service.prompt("abort-compaction-session", "Do not deliver after abort", "followUp");
-    await expect(service.status("abort-compaction-session")).resolves.toMatchObject({ pendingMessageCount: 1 });
-    await service.abort("abort-compaction-session");
+    await service.prompt(sessionRef("abort-compaction-session"), "Do not deliver after abort", "followUp");
+    await expect(service.status(sessionRef("abort-compaction-session"))).resolves.toMatchObject({ pendingMessageCount: 1 });
+    await service.abort(sessionRef("abort-compaction-session"));
 
     expect(fake.calls.clearQueue).toBe(1);
     expect(fake.calls.prompt).toEqual([]);
-    await expect(service.status("abort-compaction-session")).resolves.toMatchObject({ pendingMessageCount: 0, queuedMessages: [] });
+    await expect(service.status(sessionRef("abort-compaction-session"))).resolves.toMatchObject({ pendingMessageCount: 0, queuedMessages: [] });
     await service.dispose();
   });
 
@@ -524,7 +523,7 @@ describe("PiSessionService", () => {
       heartbeatIntervalMs: 60_000,
     });
 
-    await service.status("auth-session");
+    await service.status(sessionRef("auth-session"));
     hub.sessionEvents.length = 0;
     hub.globalEvents.length = 0;
 
@@ -553,8 +552,8 @@ describe("PiSessionService", () => {
       heartbeatIntervalMs: 60_000,
     });
 
-    await service.status("stop-session");
-    service.stop("stop-session");
+    await service.status(sessionRef("stop-session"));
+    service.stop(sessionRef("stop-session"));
 
     expect(fake.calls.clearQueue).toBe(1);
     await service.dispose();

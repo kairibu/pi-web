@@ -241,6 +241,8 @@
                 <li><code>PI_WEB_HOST</code>: web server bind host. Overrides the config file. Use <code>127.0.0.1</code> for local/tunnel-only access, or a specific VPN/private-network IP for trusted remote access.</li>
                 <li><code>PI_WEB_DATA_DIR</code>: data directory, default <code>~/.pi-web</code>.</li>
                 <li><code>PI_WEB_SESSIOND_SOCKET</code>: Unix socket path for daemon communication.</li>
+                <li><code>PI_CODING_AGENT_SESSION_DIR</code>: Pi session storage directory. PI WEB follows Pi's priority for sessions: this environment variable, then <code>sessionDir</code> in Pi settings for the selected workspace, then Pi's default session directory.</li>
+                <li><code>PI_CODING_AGENT_DIR</code>: Pi agent config directory for auth, settings, resources, and default session storage.</li>
               </ul>
             </section>
 

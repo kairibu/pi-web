@@ -86,10 +86,13 @@ export interface Workspace {
   isGitWorktree: boolean;
 }
 
-export interface SessionInfo {
+export interface SessionRef {
   id: string;
-  path: string;
   cwd: string;
+}
+
+export interface SessionInfo extends SessionRef {
+  path: string;
   name?: string;
   created: string;
   modified: string;

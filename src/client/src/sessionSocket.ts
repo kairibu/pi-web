@@ -1,11 +1,11 @@
 import { globalSessionEvents, realtimeEvents, sessionEvents } from "./api";
-import type { GlobalSessionEvent, RealtimeEvent, SessionUiEvent } from "../../shared/apiTypes";
+import type { GlobalSessionEvent, RealtimeEvent, SessionRef, SessionUiEvent } from "../../shared/apiTypes";
 
 export type { GlobalSessionEvent, RealtimeEvent, SessionUiEvent } from "../../shared/apiTypes";
 
 export class SessionSocket {
   private socket: WebSocket | undefined;
-  private sessionId: string | undefined;
+  private session: SessionRef | undefined;
   private onEvent: ((event: SessionUiEvent) => void) | undefined;
   private reconnectTimer?: number;
   private reconnectDelay = 500;
@@ -14,10 +14,10 @@ export class SessionSocket {
   private onReconnect: (() => void) | undefined;
   private machineId = "local";
 
-  connect(sessionId: string, onEvent: (event: SessionUiEvent) => void, onReconnect?: () => void, machineId = "local"): void {
+  connect(session: SessionRef, onEvent: (event: SessionUiEvent) => void, onReconnect?: () => void, machineId = "local"): void {
     this.close();
     this.machineId = machineId;
-    this.sessionId = sessionId;
+    this.session = session;
     this.onEvent = onEvent;
     this.onReconnect = onReconnect;
     this.shouldReconnect = true;
@@ -33,7 +33,7 @@ export class SessionSocket {
     window.clearTimeout(this.reconnectTimer);
     closeSocketQuietly(this.socket);
     this.socket = undefined;
-    this.sessionId = undefined;
+    this.session = undefined;
     this.onEvent = undefined;
     this.onReconnect = undefined;
     this.hasOpened = false;
@@ -41,8 +41,8 @@ export class SessionSocket {
   }
 
   private open(): void {
-    if (this.sessionId === undefined || this.sessionId === "" || !this.shouldReconnect) return;
-    const socket = sessionEvents(this.sessionId, this.machineId);
+    if (this.session === undefined || this.session.id === "" || this.session.cwd === "" || !this.shouldReconnect) return;
+    const socket = sessionEvents(this.session, this.machineId);
     this.socket = socket;
     socket.onopen = () => {
       this.reconnectDelay = 500;

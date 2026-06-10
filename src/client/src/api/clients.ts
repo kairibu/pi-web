@@ -1,4 +1,4 @@
-import type { FileSuggestion, PiWebConfigValues, RunTerminalCommandInput, TerminalCommandRun, TerminalCommandRunFilter } from "../../../shared/apiTypes";
+import type { FileSuggestion, PiWebConfigValues, RunTerminalCommandInput, SessionRef, TerminalCommandRun, TerminalCommandRunFilter } from "../../../shared/apiTypes";
 import { request } from "./http";
 import {
   arrayOf,
@@ -38,6 +38,15 @@ import {
 import { machineGitDiffUrl, messageUrl } from "./urls";
 
 const machinePrefix = (machineId = "local") => `/api/machines/${encodeURIComponent(machineId)}`;
+
+function sessionUrl(session: SessionRef, endpoint: string, machineId = "local"): string {
+  return `${machinePrefix(machineId)}/sessions/${encodeURIComponent(session.id)}/${endpoint}`;
+}
+
+function sessionQueryUrl(session: SessionRef, endpoint: string, machineId = "local"): string {
+  const query = new URLSearchParams({ cwd: session.cwd }).toString();
+  return `${sessionUrl(session, endpoint, machineId)}?${query}`;
+}
 
 export const piWebApi = {
   piWebStatus: () => request("/api/pi-web/status", parsePiWebStatusResponse),
@@ -80,25 +89,25 @@ export const workspacesApi = {
 export const sessionsApi = {
   sessions: (cwd: string, machineId = "local") => request(`${machinePrefix(machineId)}/sessions?cwd=${encodeURIComponent(cwd)}`, arrayOf(parseSessionInfo)),
   startSession: (cwd: string, machineId = "local") => request(`${machinePrefix(machineId)}/sessions`, parseSessionInfo, { method: "POST", body: JSON.stringify({ cwd }) }),
-  messages: (sessionId: string, options?: { limit?: number; before?: number }, machineId = "local") => request(messageUrl(sessionId, options, machineId), parseMessagePage),
-  status: (sessionId: string, machineId = "local") => request(`${machinePrefix(machineId)}/sessions/${sessionId}/status`, parseSessionStatus),
-  models: (sessionId: string, machineId = "local") => request(`${machinePrefix(machineId)}/sessions/${sessionId}/models`, parseModelSelectionResponse),
-  setModel: (sessionId: string, provider: string, modelId: string, machineId = "local") => request(`${machinePrefix(machineId)}/sessions/${sessionId}/model`, parseSessionStatus, { method: "POST", body: JSON.stringify({ provider, modelId }) }),
-  cycleModel: (sessionId: string, direction: "forward" | "backward", machineId = "local") => request(`${machinePrefix(machineId)}/sessions/${sessionId}/model/cycle`, parseSessionStatus, { method: "POST", body: JSON.stringify({ direction }) }),
-  thinkingLevels: (sessionId: string, machineId = "local") => request(`${machinePrefix(machineId)}/sessions/${sessionId}/thinking-levels`, parseThinkingLevelsResponse),
-  setThinkingLevel: (sessionId: string, level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh", machineId = "local") => request(`${machinePrefix(machineId)}/sessions/${sessionId}/thinking-level`, parseSessionStatus, { method: "POST", body: JSON.stringify({ level }) }),
-  cycleThinkingLevel: (sessionId: string, machineId = "local") => request(`${machinePrefix(machineId)}/sessions/${sessionId}/thinking-level/cycle`, parseSessionStatus, { method: "POST" }),
-  commands: (sessionId: string, machineId = "local") => request(`${machinePrefix(machineId)}/sessions/${sessionId}/commands`, arrayOf(parseSlashCommand)),
-  prompt: (sessionId: string, text: string, streamingBehavior?: "steer" | "followUp", machineId = "local") => request(`${machinePrefix(machineId)}/sessions/${sessionId}/prompt`, parseAccepted, { method: "POST", body: JSON.stringify(streamingBehavior === undefined ? { text } : { text, streamingBehavior }) }),
-  shell: (sessionId: string, text: string, machineId = "local") => request(`${machinePrefix(machineId)}/sessions/${sessionId}/shell`, parseAccepted, { method: "POST", body: JSON.stringify({ text }) }),
-  runCommand: (sessionId: string, text: string, machineId = "local") => request(`${machinePrefix(machineId)}/sessions/${sessionId}/commands/run`, parseCommandResult, { method: "POST", body: JSON.stringify({ text }) }),
-  respondToCommand: (sessionId: string, requestId: string, value: string, machineId = "local") => request(`${machinePrefix(machineId)}/sessions/${sessionId}/commands/respond`, parseCommandResult, { method: "POST", body: JSON.stringify({ requestId, value }) }),
-  abort: (sessionId: string, machineId = "local") => request(`${machinePrefix(machineId)}/sessions/${sessionId}/abort`, parseAborted, { method: "POST" }),
-  stop: (sessionId: string, machineId = "local") => request(`${machinePrefix(machineId)}/sessions/${sessionId}/stop`, parseStopped, { method: "POST" }),
-  archive: (sessionId: string, machineId = "local") => request(`${machinePrefix(machineId)}/sessions/${sessionId}/archive`, parseArchived, { method: "POST" }),
-  archiveWithDescendants: (sessionId: string, machineId = "local") => request(`${machinePrefix(machineId)}/sessions/${sessionId}/archive-tree`, parseArchived, { method: "POST" }),
-  restore: (sessionId: string, machineId = "local") => request(`${machinePrefix(machineId)}/sessions/${sessionId}/restore`, parseRestored, { method: "POST" }),
-  detachParent: (sessionId: string, machineId = "local") => request(`${machinePrefix(machineId)}/sessions/${sessionId}/detach-parent`, parseDetached, { method: "POST" }),
+  messages: (session: SessionRef, options?: { limit?: number; before?: number }, machineId = "local") => request(messageUrl(session, options, machineId), parseMessagePage),
+  status: (session: SessionRef, machineId = "local") => request(sessionQueryUrl(session, "status", machineId), parseSessionStatus),
+  models: (session: SessionRef, machineId = "local") => request(sessionQueryUrl(session, "models", machineId), parseModelSelectionResponse),
+  setModel: (session: SessionRef, provider: string, modelId: string, machineId = "local") => request(sessionUrl(session, "model", machineId), parseSessionStatus, { method: "POST", body: JSON.stringify({ cwd: session.cwd, provider, modelId }) }),
+  cycleModel: (session: SessionRef, direction: "forward" | "backward", machineId = "local") => request(sessionUrl(session, "model/cycle", machineId), parseSessionStatus, { method: "POST", body: JSON.stringify({ cwd: session.cwd, direction }) }),
+  thinkingLevels: (session: SessionRef, machineId = "local") => request(sessionQueryUrl(session, "thinking-levels", machineId), parseThinkingLevelsResponse),
+  setThinkingLevel: (session: SessionRef, level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh", machineId = "local") => request(sessionUrl(session, "thinking-level", machineId), parseSessionStatus, { method: "POST", body: JSON.stringify({ cwd: session.cwd, level }) }),
+  cycleThinkingLevel: (session: SessionRef, machineId = "local") => request(sessionUrl(session, "thinking-level/cycle", machineId), parseSessionStatus, { method: "POST", body: JSON.stringify({ cwd: session.cwd }) }),
+  commands: (session: SessionRef, machineId = "local") => request(sessionQueryUrl(session, "commands", machineId), arrayOf(parseSlashCommand)),
+  prompt: (session: SessionRef, text: string, streamingBehavior?: "steer" | "followUp", machineId = "local") => request(sessionUrl(session, "prompt", machineId), parseAccepted, { method: "POST", body: JSON.stringify(streamingBehavior === undefined ? { cwd: session.cwd, text } : { cwd: session.cwd, text, streamingBehavior }) }),
+  shell: (session: SessionRef, text: string, machineId = "local") => request(sessionUrl(session, "shell", machineId), parseAccepted, { method: "POST", body: JSON.stringify({ cwd: session.cwd, text }) }),
+  runCommand: (session: SessionRef, text: string, machineId = "local") => request(sessionUrl(session, "commands/run", machineId), parseCommandResult, { method: "POST", body: JSON.stringify({ cwd: session.cwd, text }) }),
+  respondToCommand: (session: SessionRef, requestId: string, value: string, machineId = "local") => request(sessionUrl(session, "commands/respond", machineId), parseCommandResult, { method: "POST", body: JSON.stringify({ cwd: session.cwd, requestId, value }) }),
+  abort: (session: SessionRef, machineId = "local") => request(sessionUrl(session, "abort", machineId), parseAborted, { method: "POST", body: JSON.stringify({ cwd: session.cwd }) }),
+  stop: (session: SessionRef, machineId = "local") => request(sessionUrl(session, "stop", machineId), parseStopped, { method: "POST", body: JSON.stringify({ cwd: session.cwd }) }),
+  archive: (session: SessionRef, machineId = "local") => request(sessionUrl(session, "archive", machineId), parseArchived, { method: "POST", body: JSON.stringify({ cwd: session.cwd }) }),
+  archiveWithDescendants: (session: SessionRef, machineId = "local") => request(sessionUrl(session, "archive-tree", machineId), parseArchived, { method: "POST", body: JSON.stringify({ cwd: session.cwd }) }),
+  restore: (session: SessionRef, machineId = "local") => request(sessionUrl(session, "restore", machineId), parseRestored, { method: "POST", body: JSON.stringify({ cwd: session.cwd }) }),
+  detachParent: (session: SessionRef, machineId = "local") => request(sessionUrl(session, "detach-parent", machineId), parseDetached, { method: "POST", body: JSON.stringify({ cwd: session.cwd }) }),
   authProviders: (options?: { mode?: "login" | "logout"; authType?: "oauth" | "api_key"; machineId?: string }) => {
     const params = new URLSearchParams();
     if (options?.mode !== undefined) params.set("mode", options.mode);

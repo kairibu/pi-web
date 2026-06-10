@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { api as defaultApi, type MessagePage, type SessionActivity, type SessionInfo, type SessionStatus, type Workspace } from "../api";
+import { api as defaultApi, type MessagePage, type SessionActivity, type SessionInfo, type SessionRef, type SessionStatus, type Workspace } from "../api";
 import { isCachedNewSessionInfo, loadCachedNewSessions, markCachedNewSessionInfo, rememberCachedNewSession } from "../cachedNewSessions";
 import { initialAppState, type AppState } from "../appState";
 import { machineSessionKey } from "../machineKeys";
@@ -38,8 +38,8 @@ class MemoryStorage implements Storage {
 class FakeSocket implements SessionEventSocket {
   readonly connectedSessionIds: string[] = [];
 
-  connect(sessionId: string): void {
-    this.connectedSessionIds.push(sessionId);
+  connect(session: SessionRef): void {
+    this.connectedSessionIds.push(session.id);
   }
 
   setHandler(): void {
@@ -179,11 +179,11 @@ describe("SessionController", () => {
     const api: typeof defaultApi = {
       ...defaultApi,
       startSession: () => Promise.resolve(replacementSession),
-      messages: (sessionId) => {
-        if (sessionId === oldSession.id) return Promise.reject(new Error("Session not found"));
+      messages: (session) => {
+        if (session.id === oldSession.id) return Promise.reject(new Error("Session not found"));
         return Promise.resolve(emptyPage);
       },
-      status: (sessionId) => Promise.resolve(status(sessionId)),
+      status: (session) => Promise.resolve(status(session.id)),
     };
     const controller = new SessionController(
       () => state,
@@ -220,7 +220,7 @@ describe("SessionController", () => {
       ...defaultApi,
       respondToCommand: () => Promise.resolve({ type: "done", message: "Session forked", session: replacementSession, promptDraft: "fork me" }),
       messages: () => Promise.resolve(emptyPage),
-      status: (sessionId) => Promise.resolve(status(sessionId)),
+      status: (session) => Promise.resolve(status(session.id)),
     };
     const controller = new SessionController(
       () => state,
@@ -243,7 +243,7 @@ describe("SessionController", () => {
       ...defaultApi,
       archive: () => Promise.resolve({ archived: true }),
       messages: () => Promise.resolve(emptyPage),
-      status: (sessionId) => Promise.resolve(status(sessionId)),
+      status: (session) => Promise.resolve(status(session.id)),
     };
     const controller = new SessionController(
       () => state,
@@ -272,7 +272,7 @@ describe("SessionController", () => {
       ...defaultApi,
       archiveWithDescendants: () => Promise.resolve({ archived: true, sessionIds: [oldSession.id, childSession.id], archivedCount: 2, skippedAlreadyArchivedCount: 0 }),
       messages: () => Promise.resolve(emptyPage),
-      status: (sessionId) => Promise.resolve(status(sessionId)),
+      status: (session) => Promise.resolve(status(session.id)),
     };
     const controller = new SessionController(
       () => state,
