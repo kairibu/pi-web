@@ -35,8 +35,8 @@ export class PromptEditor extends LitElement {
   @property({ type: Boolean }) isCompacting = false;
   @property({ type: Boolean }) canStop = false;
   @property({ attribute: false }) status?: SessionStatus;
-  @property({ attribute: false }) onSend?: (text: string, streamingBehavior?: "steer" | "followUp", attachments?: PromptAttachment[]) => void | Promise<void>;
-  @property({ attribute: false }) onSaveAttachments?: (attachments: PromptAttachment[]) => Promise<{ path: string }[]>;
+  @property({ type: Boolean }) sending = false;
+  @property({ attribute: false }) onSend?: (text: string, streamingBehavior?: "steer" | "followUp", attachments?: PromptAttachment[], delivery?: PromptAttachmentDelivery) => void | Promise<void>;
   @property({ attribute: false }) onStop?: () => void;
   @property({ attribute: false }) onSelectModel?: () => void;
   @property({ attribute: false }) onSelectThinking?: () => void;
@@ -48,8 +48,6 @@ export class PromptEditor extends LitElement {
   @state() private attachments: PendingAttachment[] = [];
   @state() private attachmentDelivery: PromptAttachmentDelivery = loadAttachmentDelivery();
   @state() private attachmentError: string | undefined = undefined;
-  @state() private isSavingAttachments = false;
-  @state() private isSending = false;
   private attachmentSeq = 0;
   private requestVersion = 0;
   private editor: EditorView | undefined;
@@ -87,16 +85,13 @@ export class PromptEditor extends LitElement {
     const inputMode = inputModeForDraft(this.draft);
     const shellMode = inputMode.kind === "shell";
     const queuesInput = this.canSteer || this.isCompacting;
-    const uploading = this.isSavingAttachments || this.isSending;
-    const busy = this.disabled || uploading;
-    const sendLabel = uploading ? "Sending…" : queuesInput ? "Queue" : "Send";
+    const busy = this.disabled || this.sending;
     return html`
       <footer class=${shellMode ? "shell-mode" : ""} @paste=${(event: ClipboardEvent) => { void this.handlePaste(event); }} @dragover=${(event: DragEvent) => { this.handleDragOver(event); }} @drop=${(event: DragEvent) => { void this.handleDrop(event); }}>
         <div class="editor-wrap">
           <div class=${`markdown-editor${this.disabled ? " markdown-editor-disabled" : ""}`} aria-label="Message pi" aria-disabled=${this.disabled ? "true" : "false"}></div>
           ${shellMode ? html`<div class="mode-hint">Shell command${inputMode.excludeFromContext ? " · excluded from context" : ""}</div>` : null}
           ${this.isCompacting && !shellMode ? html`<div class="mode-hint">Compacting history · message will be queued</div>` : null}
-          ${uploading ? html`<div class="mode-hint sending-hint" role="status">${this.isSavingAttachments ? "Saving your files…" : "Sending your files…"}</div>` : null}
           ${this.renderAttachments()}
           <autocomplete-menu .items=${this.completions} .selectedIndex=${this.selectedIndex} .onPick=${(item: CompletionItem) => { this.pick(item); }}></autocomplete-menu>
         </div>
@@ -104,8 +99,8 @@ export class PromptEditor extends LitElement {
           ${this.renderCompactStatus()}
           <input class="attachment-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden @change=${(event: Event) => { void this.handleFileInput(event); }} />
           <button class="attach-button" ?disabled=${busy} title="Attach images" @click=${() => { this.attachmentInput?.click(); }}>Attach</button>
-          <button ?disabled=${busy} title=${queuesInput ? "Queue until the current activity finishes" : "Send message"} @click=${() => { void this.send("followUp"); }}>${sendLabel}</button>
-          ${this.canSteer && !this.isCompacting ? html`<button ?disabled=${busy} title="Steer the current response before the next model call" @click=${() => { void this.send("steer"); }}>Steer</button>` : null}
+          <button ?disabled=${busy} title=${queuesInput ? "Queue until the current activity finishes" : "Send message"} @click=${() => { this.send("followUp"); }}>${queuesInput ? "Queue" : "Send"}</button>
+          ${this.canSteer && !this.isCompacting ? html`<button ?disabled=${busy} title="Steer the current response before the next model call" @click=${() => { this.send("steer"); }}>Steer</button>` : null}
           <button ?disabled=${this.disabled || !this.canStop} title=${this.canStop ? "Stop current work and clear queued messages" : "Nothing running"} @click=${() => this.onStop?.()}>Stop</button>
         </div>
       </footer>
@@ -348,7 +343,7 @@ export class PromptEditor extends LitElement {
       if (completion !== undefined) this.pick(completion);
       return true;
     }
-    void this.send(this.canSteer || this.isCompacting ? "followUp" : undefined);
+    this.send(this.canSteer || this.isCompacting ? "followUp" : undefined);
     return true;
   }
 
@@ -380,52 +375,19 @@ export class PromptEditor extends LitElement {
     this.completions = [];
   }
 
-  private async send(streamingBehavior?: "steer" | "followUp") {
-    if (this.disabled || this.isSavingAttachments || this.isSending) return;
+  private send(streamingBehavior?: "steer" | "followUp") {
+    if (this.disabled || this.sending) return;
     const text = this.draft.trim();
     const pending = this.attachments;
     if (text === "" && pending.length === 0) return;
     const behavior = this.canSteer || this.isCompacting ? streamingBehavior : undefined;
-
-    if (pending.length > 0 && this.attachmentDelivery === "folder") {
-      await this.sendWithFolderAttachments(text, behavior);
-      return;
-    }
-
     const attachments = pending.length > 0 ? this.currentAttachments() : undefined;
+    const delivery = this.attachmentDelivery;
     this.resetComposer();
-    if (attachments === undefined) {
-      // Plain text messages stay fire-and-forget so the input frees up instantly.
-      void this.onSend?.(text, behavior, attachments);
-      return;
-    }
-    // Image uploads can take a moment (large payloads, server-side resizing,
-    // first-session open), so surface a sending indicator until they land.
-    this.isSending = true;
-    try {
-      await this.onSend?.(text, behavior, attachments);
-    } catch (error) {
-      this.attachmentError = error instanceof Error ? error.message : String(error);
-    } finally {
-      this.isSending = false;
-    }
-  }
-
-  private async sendWithFolderAttachments(text: string, behavior?: "steer" | "followUp") {
-    if (this.onSaveAttachments === undefined) return;
-    this.isSavingAttachments = true;
-    this.attachmentError = undefined;
-    try {
-      const saved = await this.onSaveAttachments(this.currentAttachments());
-      const references = saved.map((file) => fileCompletionInsertText(file.path, false)).join(" ");
-      const body = text === "" ? references : `${text}\n\n${references}`;
-      this.resetComposer();
-      await this.onSend?.(body, behavior);
-    } catch (error) {
-      this.attachmentError = error instanceof Error ? error.message : String(error);
-    } finally {
-      this.isSavingAttachments = false;
-    }
+    // Sending is owned by the controller (it drives the chat activity dock and,
+    // for folder mode, orchestrates the upload + reference rewrite), so this is
+    // fire-and-forget here.
+    void this.onSend?.(text, behavior, attachments, attachments === undefined ? undefined : delivery);
   }
 
   private resetComposer() {

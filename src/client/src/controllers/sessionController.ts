@@ -6,6 +6,7 @@ import { machineSessionKey } from "../machineKeys";
 import { clearDraft, moveDraft, saveDraft } from "../promptDraftStorage";
 import { ChatTranscriptStore } from "../chatTranscriptStore";
 import { isShellInput } from "../inputModes";
+import { fileCompletionInsertText } from "../promptCompletions";
 import { SessionSocket, type GlobalSessionEvent, type SessionUiEvent } from "../sessionSocket";
 import { isSessionActive } from "../../../shared/activity";
 import { PI_WEB_CAPABILITIES, supportsPiWebCapability } from "../../../shared/capabilities";
@@ -63,7 +64,7 @@ export class SessionController {
     this.socket.close();
     this.catchupStreamSessionId = undefined;
     this.clearPendingTranscriptEvents();
-    this.setState({ selectedSession: undefined, messages: [], messagePageStart: 0, messagePageEnd: 0, messagePageTotal: 0, isLoadingEarlierMessages: false, isReceivingPartialStream: false, status: undefined, activity: undefined });
+    this.setState({ selectedSession: undefined, messages: [], messagePageStart: 0, messagePageEnd: 0, messagePageTotal: 0, isLoadingEarlierMessages: false, isReceivingPartialStream: false, isSendingPrompt: false, status: undefined, activity: undefined });
   }
 
   deselectSession(options?: { forgetRememberedSelection?: boolean | undefined; updateUrl?: boolean | undefined }) {
@@ -168,18 +169,32 @@ export class SessionController {
     }
   }
 
-  async send(text: string, streamingBehavior?: "steer" | "followUp", attachments?: PromptAttachment[]) {
+  async send(text: string, streamingBehavior?: "steer" | "followUp", attachments?: PromptAttachment[], delivery: "inline" | "folder" = "inline") {
     const trimmed = text.trim();
     const hasAttachments = attachments !== undefined && attachments.length > 0;
     if (!hasAttachments && trimmed.startsWith("/")) return this.runCommand(text);
     if (!hasAttachments && isShellInput(text)) return this.runShell(text);
     const session = this.getState().selectedSession;
     if (!session || session.archived === true) return;
+    // Surface a single optimistic sending state in the chat activity dock. It
+    // covers the pre-receipt window (upload, server-side image resizing,
+    // first-session open) and is superseded by real server activity/messages
+    // once api.prompt resolves.
+    if (hasAttachments) this.setState({ isSendingPrompt: true });
     try {
-      await this.api.prompt(session, text, streamingBehavior, selectedMachineId(this.getState()), attachments);
+      if (hasAttachments && delivery === "folder") {
+        const saved = await this.api.saveAttachments(session, attachments, selectedMachineId(this.getState()));
+        const references = saved.map((file) => fileCompletionInsertText(file.path, false)).join(" ");
+        const body = text === "" ? references : `${text}\n\n${references}`;
+        await this.api.prompt(session, body, streamingBehavior, selectedMachineId(this.getState()));
+      } else {
+        await this.api.prompt(session, text, streamingBehavior, selectedMachineId(this.getState()), attachments);
+      }
       this.markCachedNewSessionPersisted(session);
     } catch (error) {
       this.setState({ error: String(error) });
+    } finally {
+      if (hasAttachments) this.setState({ isSendingPrompt: false });
     }
   }
 
@@ -193,12 +208,6 @@ export class SessionController {
     } catch (error) {
       this.setState({ messages: [...this.getState().messages, textMessage("system", String(error))], error: String(error) });
     }
-  }
-
-  async saveAttachments(attachments: PromptAttachment[], folder?: string) {
-    const session = this.getState().selectedSession;
-    if (!session || session.archived === true || attachments.length === 0) return [];
-    return this.api.saveAttachments(session, attachments, selectedMachineId(this.getState()), folder);
   }
 
   async runCommand(text: string) {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { api as defaultApi, type MessagePage, type SessionActivity, type SessionInfo, type SessionRef, type SessionStatus, type Workspace } from "../api";
+import { api as defaultApi, type MessagePage, type PromptAttachment, type SessionActivity, type SessionInfo, type SessionRef, type SessionStatus, type Workspace } from "../api";
 import { isCachedNewSessionInfo, loadCachedNewSessions, markCachedNewSessionInfo, rememberCachedNewSession } from "../cachedNewSessions";
 import { initialAppState, type AppState } from "../appState";
 import { machineSessionKey } from "../machineKeys";
@@ -140,6 +140,84 @@ describe("SessionController", () => {
 
     expect(state.sessions[0]?.messageCount).toBe(3);
     expect(state.selectedSession?.messageCount).toBe(3);
+  });
+
+  it("toggles the sending state around an inline attachment send and forwards attachments", async () => {
+    let resolvePrompt: (() => void) | undefined;
+    const sendingDuringPrompt: boolean[] = [];
+    let promptArgs: { attachments?: PromptAttachment[] } | undefined;
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, selectedSession: oldSession, sessions: [oldSession] };
+    const attachments: PromptAttachment[] = [{ kind: "image", mimeType: "image/png", data: "QUJD", name: "shot.png" }];
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      prompt: (_session, _text, _behavior, _machineId, sentAttachments) => new Promise<{ accepted: true }>((resolve) => {
+        promptArgs = { ...(sentAttachments === undefined ? {} : { attachments: sentAttachments }) };
+        resolvePrompt = () => { resolve({ accepted: true }); };
+      }),
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    const send = controller.send("look", undefined, attachments, "inline");
+    sendingDuringPrompt.push(state.isSendingPrompt);
+    resolvePrompt?.();
+    await send;
+
+    expect(sendingDuringPrompt).toEqual([true]);
+    expect(state.isSendingPrompt).toBe(false);
+    expect(promptArgs).toEqual({ attachments });
+  });
+
+  it("uploads to the workspace folder and rewrites the prompt for folder delivery", async () => {
+    let savedCalledWith: PromptAttachment[] | undefined;
+    let promptText: string | undefined;
+    let promptAttachments: PromptAttachment[] | undefined;
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, selectedSession: oldSession, sessions: [oldSession] };
+    const attachments: PromptAttachment[] = [{ kind: "image", mimeType: "image/png", data: "QUJD", name: "shot.png" }];
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      saveAttachments: (_session, sent) => { savedCalledWith = sent; return Promise.resolve([{ path: ".pi-web/paste/shot.png", mimeType: "image/png", size: 3 }]); },
+      prompt: (_session, text, _behavior, _machineId, sentAttachments) => { promptText = text; promptAttachments = sentAttachments; return Promise.resolve({ accepted: true }); },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.send("check this", undefined, attachments, "folder");
+
+    expect(savedCalledWith).toEqual(attachments);
+    expect(promptText).toBe("check this\n\n@.pi-web/paste/shot.png");
+    expect(promptAttachments).toBeUndefined();
+    expect(state.isSendingPrompt).toBe(false);
+  });
+
+  it("does not set the sending state for plain text messages", async () => {
+    let state: AppState = { ...initialAppState(), selectedWorkspace: workspace, selectedSession: oldSession, sessions: [oldSession] };
+    const seen: boolean[] = [];
+    const api: typeof defaultApi = {
+      ...defaultApi,
+      prompt: () => { seen.push(state.isSendingPrompt); return Promise.resolve({ accepted: true }); },
+    };
+    const controller = new SessionController(
+      () => state,
+      (patch) => { state = { ...state, ...patch }; },
+      () => undefined,
+      undefined,
+      { api, socket: new FakeSocket() },
+    );
+
+    await controller.send("hello");
+    expect(seen).toEqual([false]);
+    expect(state.isSendingPrompt).toBe(false);
   });
 
   it("keeps live message count updates when a cached new session becomes persisted", async () => {
