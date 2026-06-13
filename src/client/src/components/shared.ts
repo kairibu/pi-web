@@ -144,7 +144,7 @@ export const appStyles = css`
   }
   status-bar { flex: 0 0 auto; }
   chat-view { flex: 1 1 auto; min-height: 0; overflow: hidden; }
-  prompt-editor, chat-composer { flex: 0 0 auto; }
+  prompt-editor { flex: 0 0 auto; }
   button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
   .empty { margin: auto; color: var(--pi-muted); }
   .error { padding: 10px 16px; border-bottom: 1px solid var(--pi-border); color: var(--pi-danger); }
@@ -486,5 +486,3 @@ export const promptEditorStyles = css`
     button { padding: 5px 7px; }
   }
 `;
-
-export const composerStyles = promptEditorStyles;

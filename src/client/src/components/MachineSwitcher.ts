@@ -303,10 +303,6 @@ export class MachineSwitcher extends LitElement implements KeyboardNavigableSect
   `;
 }
 
-export function shouldShowMachineSwitcher(machines: readonly Machine[]): boolean {
-  return machines.length > 1;
-}
-
 function machineStatus(machine: Machine, statuses: Record<string, MachineHealth>): MachineStatus {
   return statuses[machine.id]?.status ?? machine.status ?? "unknown";
 }
