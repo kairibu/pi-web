@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: hostexec <command...>
+
+Run a command on the Docker host by starting a temporary privileged helper
+container through the mounted Docker socket and entering the host namespaces.
+EOF
+}
+
+if [ "$#" -eq 0 ]; then
+  usage
+  exit 64
+fi
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "hostexec: docker CLI not found in this container" >&2
+  exit 127
+fi
+
+docker_host="${DOCKER_HOST:-unix:///var/run/docker.sock}"
+if [[ "$docker_host" == unix://* ]]; then
+  socket_path="${docker_host#unix://}"
+  if [ ! -S "$socket_path" ]; then
+    echo "hostexec: Docker socket is not accessible as a Unix socket at $socket_path" >&2
+    exit 69
+  fi
+fi
+
+helper_image="${HOSTEXEC_IMAGE:-alpine:3.22}"
+tty_args=(--interactive)
+if [ -t 0 ] && [ -t 1 ]; then
+  tty_args+=(--tty)
+fi
+
+exec docker run \
+  --rm \
+  "${tty_args[@]}" \
+  --pull=missing \
+  --privileged \
+  --security-opt label=disable \
+  --pid=host \
+  --network=host \
+  --volume /:/host:rw \
+  "$helper_image" \
+  nsenter -t 1 -m -u -i -n -p -- "$@"

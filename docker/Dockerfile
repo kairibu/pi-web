@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1.7
 
 ARG NODE_VERSION=22-bookworm-slim
+ARG DOCKER_CLI_VERSION=29-cli
+
+FROM docker:${DOCKER_CLI_VERSION} AS docker-cli
 
 FROM node:${NODE_VERSION} AS package
 
@@ -32,6 +35,7 @@ ENV NODE_ENV=production \
   PI_WEB_DATA_DIR=/data/pi-web \
   PI_WEB_SESSIOND_SOCKET=/data/pi-web/sessiond.sock \
   PI_CODING_AGENT_DIR=/data/pi-agent \
+  HOSTEXEC_IMAGE=alpine:3.22 \
   SHELL=/bin/bash \
   TERM=xterm-256color
 
@@ -50,6 +54,8 @@ RUN apt-get update \
 
 COPY --from=package /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=package /usr/local/bin /usr/local/bin
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --chmod=0755 bin/hostexec /usr/local/bin/hostexec
 
 WORKDIR /workspace
 USER node

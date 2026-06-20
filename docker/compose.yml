@@ -14,6 +14,7 @@ x-pi-web-environment: &pi-web-environment
   PI_WEB_DATA_DIR: /data/pi-web
   PI_WEB_SESSIOND_SOCKET: /data/pi-web/sessiond.sock
   PI_CODING_AGENT_DIR: /data/pi-agent
+  HOSTEXEC_IMAGE: ${HOSTEXEC_IMAGE:-alpine:3.22}
   PI_WEB_MAX_UPLOAD_BYTES: ${PI_WEB_MAX_UPLOAD_BYTES:-67108864}
 
 x-pi-web-volumes: &pi-web-volumes
@@ -46,6 +47,8 @@ services:
     user: "${PI_WEB_UID:-1000}:${PI_WEB_GID:-1000}"
     group_add:
       - "${DOCKER_GID:-0}"
+    security_opt:
+      - label=disable
     environment: *pi-web-environment
     volumes: *pi-web-volumes
     healthcheck:
@@ -66,6 +69,8 @@ services:
     user: "${PI_WEB_UID:-1000}:${PI_WEB_GID:-1000}"
     group_add:
       - "${DOCKER_GID:-0}"
+    security_opt:
+      - label=disable
     environment:
       <<: *pi-web-environment
       PI_WEB_HOST: 0.0.0.0
