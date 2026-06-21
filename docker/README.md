@@ -102,6 +102,34 @@ Common environment variables written to `.env`:
 
 Host-derived IDs are refreshed on rerun unless you explicitly override them. User-facing values such as data directory, bind address, port, image names, upload limit, and version pins are preserved from an existing `.env` unless you pass a flag or environment override.
 
+### Custom image hooks
+
+The runtime image can be extended without changing PI WEB's Dockerfile. Put local Bash scripts ending in `.sh` under:
+
+```text
+~/.local/share/pi-web-docker/custom-image.d/
+```
+
+The installer preserves that directory, includes the `*.sh` files in the Docker build context, and runs each script as `root` during the image build in lexical order. Use this for optional tools such as `gh`, `glab`, `kubectl`, or cloud CLIs that you do not want in the default image.
+
+Example:
+
+```bash
+mkdir -p ~/.local/share/pi-web-docker/custom-image.d
+$EDITOR ~/.local/share/pi-web-docker/custom-image.d/10-github-cli.sh
+curl -fsSL https://raw.githubusercontent.com/jmfederico/pi-web/main/docker/install.sh | sh
+```
+
+Keep credentials out of these scripts. Authenticate tools after the container starts so secrets live in the persistent `/data` mount, for example through `/data/home` and `/data/config`.
+
+For Docker development from this checkout, use the equivalent local directory:
+
+```text
+docker/custom-image.d/
+```
+
+Files in that development hook directory are ignored by Git except for the placeholder that keeps the directory available to Docker builds.
+
 ### Version pinning
 
 Pin npm package versions when you want repeatable rebuilds:

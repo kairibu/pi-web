@@ -306,6 +306,12 @@ write_asset .dockerignore 0644
 write_asset install.sh 0755
 write_asset bin/hostexec 0755
 
+custom_image_hooks_dir=$install_dir/custom-image.d
+mkdir -p "$custom_image_hooks_dir" || die "could not create custom image hooks directory: $custom_image_hooks_dir"
+if [ ! -e "$custom_image_hooks_dir/.gitkeep" ]; then
+  : >"$custom_image_hooks_dir/.gitkeep" || die "could not initialize custom image hooks directory: $custom_image_hooks_dir"
+fi
+
 pi_web_uid=$(value_from_env_or_default PI_WEB_UID "$(id -u)")
 pi_web_gid=$(value_from_env_or_default PI_WEB_GID "$(id -g)")
 docker_gid=$(value_from_env_or_default DOCKER_GID "$(detect_docker_gid)")
@@ -364,6 +370,7 @@ mv "$temp_env" "$env_file"
 log "Wrote Docker assets to $install_dir"
 log "Wrote runtime environment to $env_file"
 log "Persistent PI WEB Docker data: $data_dir"
+log "Custom image hooks: $custom_image_hooks_dir"
 
 if [ "${PI_WEB_DOCKER_SKIP_COMPOSE:-0}" = 1 ]; then
   log "Skipping Docker build/recreate because PI_WEB_DOCKER_SKIP_COMPOSE=1"

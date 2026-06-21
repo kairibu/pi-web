@@ -52,6 +52,16 @@ RUN apt-get update \
   && mkdir -p /data/home /data/config /data/pi-web /data/pi-agent /workspace \
   && chown -R node:node /data /workspace
 
+COPY custom-image.d/ /tmp/pi-web-custom-image.d/
+RUN bash -euxo pipefail -c '\
+  shopt -s nullglob; \
+  for script in /tmp/pi-web-custom-image.d/*.sh; do \
+    echo "Running PI WEB custom image hook: ${script}"; \
+    bash "${script}"; \
+  done; \
+  rm -rf /tmp/pi-web-custom-image.d /var/lib/apt/lists/* \
+'
+
 COPY --from=package /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=package /usr/local/bin /usr/local/bin
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker

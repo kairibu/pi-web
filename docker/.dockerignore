@@ -3,3 +3,6 @@
 !Dockerfile
 !bin/
 !bin/hostexec
+!custom-image.d/
+!custom-image.d/.gitkeep
+!custom-image.d/*.sh
