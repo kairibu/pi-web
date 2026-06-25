@@ -138,6 +138,9 @@ esac
 
 runtime_user=pi-web
 runtime_group=pi-web
+runtime_home=/data/home
+mkdir -p "$runtime_home" /data/config /data/npm-cache /data/pi-web /data/pi-agent /workspace
+
 if getent group "$runtime_gid" >/dev/null 2>&1; then
   runtime_group=$(getent group "$runtime_gid" | cut -d: -f1)
 elif getent group "$runtime_group" >/dev/null 2>&1; then
@@ -147,13 +150,12 @@ else
 fi
 
 if id "$runtime_user" >/dev/null 2>&1; then
-  usermod --non-unique --uid "$runtime_uid" --gid "$runtime_group" --home "/home/$runtime_user" --shell /bin/bash "$runtime_user"
+  usermod --non-unique --uid "$runtime_uid" --gid "$runtime_group" --home "$runtime_home" --shell /bin/bash "$runtime_user"
 else
-  useradd --non-unique --uid "$runtime_uid" --gid "$runtime_group" --create-home --home-dir "/home/$runtime_user" --shell /bin/bash "$runtime_user"
+  useradd --non-unique --uid "$runtime_uid" --gid "$runtime_group" --no-create-home --home-dir "$runtime_home" --shell /bin/bash "$runtime_user"
 fi
 
-mkdir -p /data/home /data/config /data/npm-cache /data/pi-web /data/pi-agent /workspace "/home/$runtime_user"
-chown -R "$runtime_uid:$runtime_gid" /data /workspace "/home/$runtime_user"
+chown -R "$runtime_uid:$runtime_gid" /data /workspace
 
 zypper clean --all
 rm -rf /var/cache/zypp/*

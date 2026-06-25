@@ -54,6 +54,7 @@ ENV NODE_ENV=production \
 COPY --from=package /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=package /usr/local/bin /usr/local/bin
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins /usr/local/libexec/docker/cli-plugins
 COPY bin/hostexec /usr/local/bin/hostexec
 RUN chmod 0755 /usr/local/bin/hostexec
 

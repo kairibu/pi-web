@@ -72,16 +72,6 @@ Common alternatives:
 curl -fsSL https://raw.githubusercontent.com/jmfederico/pi-web/main/install.sh | sh
 ```
 
-For trusted local/server installs, PI WEB also has a Docker local-build runtime:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/jmfederico/pi-web/main/docker/install.sh | sh
-```
-
-The Docker setup builds an openSUSE Tumbleweed based local image from npm, runs split `sessiond` and `web` services, and binds the browser UI to `127.0.0.1:8504` by default. It intentionally mounts the Docker socket and selected host paths; treat it as root-equivalent host access and use an SSH tunnel, VPN, or authenticated reverse proxy for remote access.
-
-See the [Docker guide](https://github.com/jmfederico/pi-web/blob/main/docker/README.md) for trust warnings, version pinning, package customization, host command examples, and development Compose usage.
-
 PI WEB is also published as a Pi package:
 
 ```bash
@@ -182,17 +172,6 @@ pi-web install --dev
 `pi-web install --dev` writes the session daemon plus a UI development service using the native user-service backend. `pi-web uninstall` removes both production and development service files; no uninstall flags are needed.
 
 `dev:web` also watches bundled plugin TypeScript and rebuilds the browser-loaded plugin JavaScript under `dist/pi-web-plugins/`. You can restart `dev:web` or `dev:client` without stopping active Pi sessions.
-
-Docker development from the checkout is available too:
-
-```bash
-export PI_WEB_UID=$(id -u)
-export PI_WEB_GID=$(id -g)
-export DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
-docker compose -f docker/compose.dev.yml up --build
-```
-
-Open <http://127.0.0.1:8505>. The Docker dev setup keeps `sessiond` separate from the autoreloading web/API/client service and uses the runtime Docker data directory by default so sessions can be shared across modes. See the [Docker guide](https://github.com/jmfederico/pi-web/blob/main/docker/README.md#development-docker-setup).
 
 For a production-style run from a checkout:
 

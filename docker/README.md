@@ -1,4 +1,6 @@
-# PI WEB Docker
+# PI WEB Docker (beta)
+
+This Docker setup is beta. It is useful for trusted local/server testing and development, but it may still have rough edges and is intentionally documented only here for now.
 
 PI WEB has two Docker modes:
 
@@ -108,7 +110,7 @@ Host-derived IDs are refreshed on rerun unless you explicitly override them. Use
 
 ### Base image and tooling
 
-The Docker runtime and development images are openSUSE Tumbleweed based by default. They install Node.js 22, npm, `npx`, and Corepack through zypper, using the openSUSE Node.js build service repository when needed for the selected architecture. The image's `pi-web` account is created with `PI_WEB_UID:PI_WEB_GID`, so shells have a passwd entry instead of showing `I have no name!` when the host user is not `1000:1000`. The image also includes common agent/development tools such as Git/Git LFS, GitHub CLI, OpenSSH, Python with pip/virtualenv and headers, native build tooling, `jq`, `ripgrep`, `fd`, `fzf`, `bat`, ShellCheck, archive tools, network utilities, and the Docker CLI.
+The Docker runtime and development images are openSUSE Tumbleweed based by default. They install Node.js 22, npm, `npx`, and Corepack through zypper, using the openSUSE Node.js build service repository when needed for the selected architecture. The image's `pi-web` account is created with `PI_WEB_UID:PI_WEB_GID` and `/data/home` as its home directory, so shells have a passwd entry instead of showing `I have no name!` while user config stays in the persistent `/data` mount. The image also includes common agent/development tools such as Git/Git LFS, GitHub CLI, OpenSSH, Python with pip/virtualenv and headers, native build tooling, `jq`, `ripgrep`, `fd`, `fzf`, `bat`, ShellCheck, archive tools, network utilities, and the Docker CLI with Compose and Buildx plugins.
 
 Install extra distro packages without writing a hook by setting a whitespace-delimited package list:
 
