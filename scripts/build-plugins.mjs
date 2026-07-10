@@ -3,6 +3,7 @@ import { watch } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import ts from "typescript";
+import { build } from "esbuild";
 
 const rootDir = resolve("pi-web-plugins");
 const outDir = resolve("dist/pi-web-plugins");
@@ -58,6 +59,20 @@ async function buildDirectory(sourceDir, targetDir) {
 }
 
 async function buildFile(file, outputPath) {
+  await build({
+    entryPoints: [file],
+    outfile: outputPath,
+    bundle: true,
+    format: "esm",
+    platform: "browser",
+    target: "es2022",
+    sourcemap: false,
+    absWorkingDir: cwd,
+    logLevel: "silent",
+  });
+}
+
+/* async function buildFile(file, outputPath) {
   const source = await readFile(file, "utf8");
   const transpiled = ts.transpileModule(source, {
     fileName: file,
@@ -70,15 +85,14 @@ async function buildFile(file, outputPath) {
       sourceMap: false,
       inlineSourceMap: false,
     },
-  });
-
+  }); 
   const errors = (transpiled.diagnostics ?? []).filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error);
   if (errors.length > 0) throw new Error(formatDiagnostics(errors));
 
   const output = `// Generated from ${relative(cwd, file)}. Do not edit directly.\n${transpiled.outputText}`;
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, output);
-}
+}*/
 
 async function findPluginDirs(dir) {
   const entries = await readDirectory(dir);
