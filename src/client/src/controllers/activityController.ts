@@ -1,20 +1,27 @@
 import { activityApi as defaultApi, type WorkspaceActivity, type WorkspaceActivityResponse } from "../api";
 import { isWorkspaceActivityActive } from "../../../shared/activity";
 import { selectedMachineId, type GetState, type SetState } from "./types";
+import { TrailingRefreshCoordinator } from "./trailingRefreshCoordinator";
 
 export interface ActivityControllerDependencies {
   api?: Pick<typeof defaultApi, "workspaceActivity">;
+  onActivityApplied?: (machineId: string) => void;
 }
 
 export class ActivityController {
   private readonly api: Pick<typeof defaultApi, "workspaceActivity">;
+  private readonly onActivityApplied: ((machineId: string) => void) | undefined;
+  private readonly refreshes = new TrailingRefreshCoordinator<string>();
 
   constructor(private readonly getState: GetState, private readonly setState: SetState, deps: ActivityControllerDependencies = {}) {
     this.api = deps.api ?? defaultApi;
+    this.onActivityApplied = deps.onActivityApplied;
   }
 
-  async refresh(machineId = selectedMachineId(this.getState())): Promise<void> {
-    this.applyMachineActivitySnapshot(machineId, indexWorkspaceActivities(await this.api.workspaceActivity(machineId)));
+  refresh(machineId = selectedMachineId(this.getState())): Promise<void> {
+    return this.refreshes.request(machineId, async () => {
+      this.applyMachineActivitySnapshot(machineId, indexWorkspaceActivities(await this.api.workspaceActivity(machineId)));
+    });
   }
 
   applyWorkspaceActivity(activity: WorkspaceActivity, machineId = selectedMachineId(this.getState())): void {
@@ -26,6 +33,7 @@ export class ActivityController {
       machineActivities: { ...state.machineActivities, [machineId]: nextMachineActivities },
       ...(isSelectedMachine ? { workspaceActivities: nextMachineActivities } : {}),
     });
+    this.onActivityApplied?.(machineId);
   }
 
   private applyMachineActivitySnapshot(machineId: string, activities: Record<string, WorkspaceActivity>): void {
@@ -34,6 +42,7 @@ export class ActivityController {
       machineActivities: { ...state.machineActivities, [machineId]: activities },
       ...(selectedMachineId(state) === machineId ? { workspaceActivities: activities } : {}),
     });
+    this.onActivityApplied?.(machineId);
   }
 }
 

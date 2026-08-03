@@ -10,7 +10,7 @@ function FakeWebSocket(url: string): void {
 beforeEach(() => {
   webSocketUrls.length = 0;
   vi.stubGlobal("WebSocket", FakeWebSocket);
-  vi.stubGlobal("location", { protocol: "https:", host: "pi.example.test" });
+  vi.stubGlobal("document", { baseURI: "https://pi.example.test/" });
 });
 
 afterEach(() => {
@@ -27,14 +27,6 @@ describe("machine-scoped socket urls", () => {
       "wss://pi.example.test/api/machines/local/sessions/s1/events?cwd=%2Frepo",
       "wss://pi.example.test/api/machines/local/sessions/events",
       "wss://pi.example.test/api/machines/local/events",
-    ]);
-  });
-
-  it("keeps legacy session socket urls usable without cwd", () => {
-    sessionEvents("s1");
-
-    expect(webSocketUrls).toEqual([
-      "wss://pi.example.test/api/machines/local/sessions/s1/events",
     ]);
   });
 

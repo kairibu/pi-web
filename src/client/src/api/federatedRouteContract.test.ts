@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Workspace } from "../../../shared/apiTypes";
-import { FEDERATED_HTTP_ROUTES, FEDERATED_WEBSOCKET_ROUTES, type FederatedHttpRouteSpec } from "../../../shared/federatedRoutes";
+import { FEDERATED_HTTP_ROUTES, FEDERATED_WEBSOCKET_ROUTES, SESSION_TREE_NAVIGATION_PROXY_TIMEOUT_MS, type FederatedHttpRouteSpec } from "../../../shared/federatedRoutes";
 import { activityApi, configApi, filesApi, gitApi, piPackagesApi, piWebApi, pluginsApi, projectsApi, sessionsApi, terminalsApi, workspacesApi } from "./clients";
 import { globalSessionEvents, realtimeEvents, sessionEvents, terminalSocket } from "./sockets";
 import { workspaceImagePreviewUrl } from "./urls";
@@ -14,20 +14,70 @@ const workspace: Workspace = {
   isMain: true,
   isGitRepo: true,
   isGitWorktree: true,
+  effectiveConfig: {},
 };
 const session = { id: "s 1", cwd: workspace.path };
+
+beforeEach(() => {
+  vi.stubGlobal("document", { baseURI: "https://pi.example.test/" });
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe("federated route contract", () => {
+  it("allowlists notification HTTP routes without adding a notification WebSocket", () => {
+    expect(FEDERATED_HTTP_ROUTES.filter((route) => route.path.includes("notifications"))).toEqual([
+      { method: "GET", path: "/sessions/notifications" },
+      { method: "GET", path: "/sessions/:sessionId/notifications" },
+      { method: "POST", path: "/sessions/:sessionId/notifications/dismiss" },
+      { method: "POST", path: "/sessions/:sessionId/notifications/dismiss-all" },
+    ]);
+    expect(FEDERATED_WEBSOCKET_ROUTES.some((path) => path.includes("notifications"))).toBe(false);
+  });
+
+  it("allowlists both ask routes without adding an ask WebSocket", () => {
+    expect(FEDERATED_HTTP_ROUTES.filter((route) => route.path.includes("/ask/"))).toEqual([
+      { method: "POST", path: "/sessions/:sessionId/ask/submit" },
+      { method: "POST", path: "/sessions/:sessionId/ask/cancel" },
+    ]);
+    expect(FEDERATED_WEBSOCKET_ROUTES.some((path) => path.includes("ask"))).toBe(false);
+  });
+
+  it("allowlists both extension dialog routes on the existing session WebSocket", () => {
+    expect(FEDERATED_HTTP_ROUTES.filter((route) => route.path.includes("/dialogs/"))).toEqual([
+      { method: "POST", path: "/sessions/:sessionId/dialogs/answer" },
+      { method: "POST", path: "/sessions/:sessionId/dialogs/cancel" },
+    ]);
+    expect(FEDERATED_WEBSOCKET_ROUTES.some((path) => path.includes("dialogs"))).toBe(false);
+  });
+
+  it("allowlists daemon-authoritative unread HTTP routes on the existing global socket", () => {
+    expect(FEDERATED_HTTP_ROUTES.filter((route) => route.path.includes("unread"))).toEqual([
+      { method: "GET", path: "/sessions/unread" },
+      { method: "POST", path: "/sessions/:sessionId/unread/acknowledge" },
+    ]);
+    expect(FEDERATED_WEBSOCKET_ROUTES.some((path) => path.includes("unread"))).toBe(false);
+  });
+
+  it("allowlists session tree navigation with a long model-operation timeout and no new WebSocket", () => {
+    expect(FEDERATED_HTTP_ROUTES.find((route) => route.path === "/sessions/:sessionId/tree/navigate")).toEqual({
+      method: "POST",
+      path: "/sessions/:sessionId/tree/navigate",
+      timeoutMs: SESSION_TREE_NAVIGATION_PROXY_TIMEOUT_MS,
+    });
+    expect(SESSION_TREE_NAVIGATION_PROXY_TIMEOUT_MS).toBe(5 * 60_000);
+    expect(FEDERATED_WEBSOCKET_ROUTES.some((path) => path.includes("tree"))).toBe(false);
+  });
+
   it("covers machine-scoped client HTTP calls with remote proxy routes", async () => {
     const fetchMock = vi.fn<FetchLike>(() => Promise.resolve(jsonResponse({})));
     vi.stubGlobal("fetch", fetchMock);
 
     await Promise.all([
       ignoreParseFailure(piWebApi.piWebStatus(machineId)),
+      ignoreParseFailure(piWebApi.checkForUpdates(machineId)),
       ignoreParseFailure(configApi.config(machineId)),
       ignoreParseFailure(configApi.saveConfig({ spawnSessions: true }, machineId)),
       ignoreParseFailure(pluginsApi.plugins(machineId)),
@@ -47,11 +97,12 @@ describe("federated route contract", () => {
       ignoreParseFailure(workspacesApi.writeWorkspaceFile("p 1", "w 1", "README.md", "hello", { overwrite: false }, machineId)),
       ignoreParseFailure(workspacesApi.deleteWorkspaceFile("p 1", "w 1", "README.md", machineId)),
       ignoreParseFailure(workspacesApi.moveWorkspaceFile("p 1", "w 1", "README.md", "docs/README.md", { overwrite: false }, machineId)),
-      ignoreParseFailure(filesApi.files("/repo", "README", { kind: "tracked", mode: "file", machineId })),
-      ignoreParseFailure(filesApi.files("/repo", "README", { kind: "tracked", mode: "file", projectId: "p 1", workspaceId: "w 1", machineId, workspaceScoped: true })),
+      ignoreParseFailure(filesApi.files("README", { kind: "tracked", mode: "file", projectId: "p 1", workspaceId: "w 1", machineId })),
       ignoreParseFailure(gitApi.gitStatus("p 1", "w 1", machineId)),
       ignoreParseFailure(gitApi.gitDiff("p 1", "w 1", { path: "README.md", staged: true }, machineId)),
       ignoreParseFailure(sessionsApi.sessions("/repo", machineId)),
+      ignoreParseFailure(sessionsApi.unreadCatalog(machineId)),
+      ignoreParseFailure(sessionsApi.acknowledgeUnread(session, "catalog-a", 7, machineId)),
       ignoreParseFailure(sessionsApi.startSession("/repo", machineId)),
       ignoreParseFailure(sessionsApi.cleanupPreview({ archiveIdleDays: 14 }, machineId)),
       ignoreParseFailure(sessionsApi.cleanup({ archiveIdleDays: 14, deleteArchivedDays: 30, projectCwds: ["/repo"] }, machineId)),
@@ -59,6 +110,13 @@ describe("federated route contract", () => {
       ignoreParseFailure(sessionsApi.deleteArchivedMany([session], machineId)),
       ignoreParseFailure(sessionsApi.messages(session, { limit: 20, before: 10 }, machineId)),
       ignoreParseFailure(sessionsApi.status(session, machineId)),
+      ignoreParseFailure(sessionsApi.streamSnapshot(session, machineId)),
+      ignoreParseFailure(sessionsApi.clearQueue(session, machineId)),
+      ignoreParseFailure(sessionsApi.dismissWarning(session, "anthropicExtraUsage", machineId)),
+      ignoreParseFailure(sessionsApi.submitAsk(session, "ask 1", { answers: [{ id: "q1", values: ["pg"] }] }, machineId)),
+      ignoreParseFailure(sessionsApi.cancelAsk(session, "ask 1", machineId)),
+      ignoreParseFailure(sessionsApi.answerDialog(session, "dialog 1", true, machineId)),
+      ignoreParseFailure(sessionsApi.cancelDialog(session, "dialog 1", machineId)),
       ignoreParseFailure(sessionsApi.models(session, machineId)),
       ignoreParseFailure(sessionsApi.setModel(session, "openai", "gpt", machineId)),
       ignoreParseFailure(sessionsApi.cycleModel(session, "forward", machineId)),
@@ -71,16 +129,16 @@ describe("federated route contract", () => {
       ignoreParseFailure(sessionsApi.shell(session, "ls", machineId)),
       ignoreParseFailure(sessionsApi.runCommand(session, "/help", machineId)),
       ignoreParseFailure(sessionsApi.respondToCommand(session, "req 1", "yes", machineId)),
+      ignoreParseFailure(sessionsApi.navigateTree(session, { targetId: "entry-1", expectedLeafId: "leaf-1", summary: { mode: "none" } }, machineId)),
       ignoreParseFailure(sessionsApi.abort(session, machineId)),
       ignoreParseFailure(sessionsApi.stop(session, machineId)),
       ignoreParseFailure(sessionsApi.archive(session, machineId)),
       ignoreParseFailure(sessionsApi.archiveWithDescendants(session, machineId)),
       ignoreParseFailure(sessionsApi.restore(session, machineId)),
-      ignoreParseFailure(sessionsApi.deleteArchived(session, machineId)),
       ignoreParseFailure(sessionsApi.reloadSession(session, machineId)),
       ignoreParseFailure(sessionsApi.detachParent(session, machineId)),
       ignoreParseFailure(sessionsApi.authProviders({ mode: "login", authType: "oauth", machineId })),
-      ignoreParseFailure(sessionsApi.saveApiKey("openai", "key", machineId)),
+      ignoreParseFailure(sessionsApi.startInteractiveApiKeyLogin("amazon-bedrock", machineId)),
       ignoreParseFailure(sessionsApi.logoutProvider("openai", machineId)),
       ignoreParseFailure(sessionsApi.startOAuthLogin("openai", machineId)),
       ignoreParseFailure(sessionsApi.oauthFlow("flow 1", machineId)),
@@ -112,7 +170,6 @@ describe("federated route contract", () => {
       webSocketUrls.push(url);
     }
     vi.stubGlobal("WebSocket", FakeWebSocket);
-    vi.stubGlobal("location", { protocol: "https:", host: "pi.example.test" });
 
     sessionEvents(session, machineId);
     globalSessionEvents(machineId);
@@ -145,8 +202,9 @@ function fetchCallToRoute(call: Parameters<FetchLike>, scopedMachineId: string):
 function routeFromMachineUrl(method: string, input: string | URL | Request, scopedMachineId: string): ObservedHttpRoute {
   const url = toUrl(input);
   const prefix = `/api/machines/${encodeURIComponent(scopedMachineId)}`;
-  if (!url.pathname.startsWith(prefix)) throw new Error(`Expected machine-scoped URL, got ${url.pathname}`);
-  return { method, path: url.pathname.slice(prefix.length) || "/" };
+  const prefixIndex = url.pathname.lastIndexOf(prefix);
+  if (prefixIndex === -1) throw new Error(`Expected machine-scoped URL, got ${url.pathname}`);
+  return { method, path: url.pathname.slice(prefixIndex + prefix.length) || "/" };
 }
 
 function toUrl(input: string | URL | Request): URL {

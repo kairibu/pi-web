@@ -1,9 +1,8 @@
 import { html } from "lit";
 import { describe, expect, it, vi } from "vitest";
-import type { DeleteWorkspaceFileResponse, FileContentResponse, MoveWorkspaceFileResponse, SessionInfo, SessionStatus, WriteWorkspaceFileResponse, Workspace } from "../api";
+import type { DeleteWorkspaceFileResponse, FileContentResponse, FileTreeResponse, MoveWorkspaceFileResponse, SessionInfo, SessionStatus, WriteWorkspaceFileResponse, Workspace } from "../api";
 import { initialAppState, type AppState } from "../appState";
 import { markCachedNewSessionInfo } from "../cachedNewSessions";
-import { PI_WEB_CAPABILITIES } from "../../../shared/capabilities";
 import { machineScopedPluginId } from "../../../shared/machinePluginIds";
 import { corePlugin } from "./core";
 import { PluginRegistry } from "./registry";
@@ -38,6 +37,8 @@ function createContext(statePatch: Partial<AppState> = {}) {
     configureAuth: vi.fn(() => { calls.push("configureAuth"); }),
     logoutAuth: vi.fn(() => { calls.push("logoutAuth"); }),
     openThemePicker: vi.fn(() => { calls.push("openThemePicker"); }),
+    openModelPicker: vi.fn(() => { calls.push("openModelPicker"); }),
+    openThinkingLevelPicker: vi.fn(() => { calls.push("openThinkingLevelPicker"); }),
     selectMainView: vi.fn((view: AppState["mainView"]) => { calls.push(`selectMainView:${view}`); }),
     selectWorkspaceTool: vi.fn((tool: AppState["workspaceTool"]) => { calls.push(`selectWorkspaceTool:${tool}`); }),
     openTerminal: vi.fn((options?: { terminalId?: string | undefined }) => { calls.push(`openTerminal:${options?.terminalId ?? ""}`); }),
@@ -177,18 +178,13 @@ describe("PluginRegistry", () => {
     const registry = new PluginRegistry();
     registry.register({ id: "core", plugin: corePlugin });
 
-    const persistedStateRuntime = { local: { machineId: "local", ok: true as const, checkedAt: "now", capabilities: [PI_WEB_CAPABILITIES.sessionsPersistedState] } };
-    const persistedActions = registry.getActions(createContext({ selectedSession: testSession({ persisted: true }), machineRuntimes: persistedStateRuntime }).context);
+    const persistedActions = registry.getActions(createContext({ selectedSession: testSession({ persisted: true }) }).context);
     expect(persistedActions.find((action) => action.id === "core:session.archive")?.enabled).toBe(true);
     expect(persistedActions.find((action) => action.id === "core:session.delete")?.enabled).toBe(false);
 
-    const unknownActions = registry.getActions(createContext({ selectedSession: testSession(), machineRuntimes: persistedStateRuntime }).context);
+    const unknownActions = registry.getActions(createContext({ selectedSession: testSession() }).context);
     expect(unknownActions.find((action) => action.id === "core:session.archive")?.enabled).toBe(false);
     expect(unknownActions.find((action) => action.id === "core:session.delete")?.enabled).toBe(false);
-
-    const legacyUnknownActions = registry.getActions(createContext({ selectedSession: testSession() }).context);
-    expect(legacyUnknownActions.find((action) => action.id === "core:session.archive")?.enabled).toBe(true);
-    expect(legacyUnknownActions.find((action) => action.id === "core:session.delete")?.enabled).toBe(false);
 
     const transientActions = registry.getActions(createContext({ selectedSession: testSession({ persisted: false }) }).context);
     expect(transientActions.find((action) => action.id === "core:session.archive")?.enabled).toBe(false);
@@ -216,43 +212,54 @@ describe("PluginRegistry", () => {
     expect(statusTransient.find((action) => action.id === "core:session.delete")?.enabled).toBe(true);
   });
 
-  it("enables session disk reload only for a writable session on a capable, idle runtime", () => {
+  it("enables session disk reload only for a writable, idle session", () => {
     const registry = new PluginRegistry();
     registry.register({ id: "core", plugin: corePlugin });
-    const reloadRuntime = { local: { machineId: "local", ok: true as const, checkedAt: "now", capabilities: [PI_WEB_CAPABILITIES.sessionsReload, PI_WEB_CAPABILITIES.sessionsPersistedState] } };
-    const legacyReloadRuntime = { local: { machineId: "local", ok: true as const, checkedAt: "now", capabilities: [PI_WEB_CAPABILITIES.sessionsReload] } };
 
-    const reloadable = registry.getActions(createContext({ selectedSession: testSession({ persisted: true }), machineRuntimes: reloadRuntime }).context);
+    const reloadable = registry.getActions(createContext({ selectedSession: testSession({ persisted: true }) }).context);
     const reloadableAction = reloadable.find((action) => action.id === "core:session.reload");
     expect(reloadableAction?.enabled).toBe(true);
     expect(reloadableAction?.title).toBe("Reload Session from Disk");
     expect(reloadableAction?.description).toContain("Use /reload in the prompt for Pi runtime resources");
 
-    const noCapability = registry.getActions(createContext({ selectedSession: testSession({ persisted: true }) }).context);
-    const noCapabilityReload = noCapability.find((action) => action.id === "core:session.reload");
-    expect(noCapabilityReload?.enabled).toBe(false);
-    expect(noCapabilityReload?.disabledReason).toBe("Update and restart Pi-Web on this machine to reload sessions from disk.");
+    const noRuntime = registry.getActions(createContext({ selectedSession: testSession({ persisted: true }) }).context);
+    expect(noRuntime.find((action) => action.id === "core:session.reload")?.enabled).toBe(true);
 
-    const unknown = registry.getActions(createContext({ selectedSession: testSession(), machineRuntimes: reloadRuntime }).context);
+    const unknown = registry.getActions(createContext({ selectedSession: testSession() }).context);
     expect(unknown.find((action) => action.id === "core:session.reload")?.enabled).toBe(false);
 
-    const legacyUnknown = registry.getActions(createContext({ selectedSession: testSession(), machineRuntimes: legacyReloadRuntime }).context);
-    expect(legacyUnknown.find((action) => action.id === "core:session.reload")?.enabled).toBe(true);
-
-    const transient = registry.getActions(createContext({ selectedSession: testSession({ persisted: false }), machineRuntimes: reloadRuntime }).context);
+    const transient = registry.getActions(createContext({ selectedSession: testSession({ persisted: false }) }).context);
     expect(transient.find((action) => action.id === "core:session.reload")?.enabled).toBe(false);
 
-    const archived = registry.getActions(createContext({ selectedSession: { ...testSession({ persisted: true }), archived: true, archivedAt: "2026-05-20T00:00:00.000Z" }, machineRuntimes: reloadRuntime }).context);
+    const archived = registry.getActions(createContext({ selectedSession: { ...testSession({ persisted: true }), archived: true, archivedAt: "2026-05-20T00:00:00.000Z" } }).context);
     expect(archived.find((action) => action.id === "core:session.reload")?.enabled).toBe(false);
 
-    const busy = registry.getActions(createContext({ selectedSession: testSession({ persisted: true }), machineRuntimes: reloadRuntime, status: testStatus({ persisted: true, isStreaming: true }) }).context);
+    const busy = registry.getActions(createContext({ selectedSession: testSession({ persisted: true }), status: testStatus({ persisted: true, isStreaming: true }) }).context);
     expect(busy.find((action) => action.id === "core:session.reload")?.enabled).toBe(false);
+  });
+
+  it("treats a session that is only starting up as having no work to stop or block", () => {
+    const registry = new PluginRegistry();
+    registry.register({ id: "core", plugin: corePlugin });
+    const startupActivity = { sessionId: "s1", phase: "active" as const, label: "Opening session", detail: "Starting the Pi session", at: "now", startup: true };
+
+    const opening = registry.getActions(createContext({ selectedSession: testSession({ persisted: true }), status: testStatus({ persisted: true }), activity: startupActivity }).context);
+
+    // Nothing is being worked on, so there is nothing to stop and no reason to
+    // block a reload with "Stop current session activity before reloading".
+    expect(opening.find((action) => action.id === "core:session.stop")?.enabled).toBe(false);
+    expect(opening.find((action) => action.id === "core:session.reload")?.enabled).toBe(true);
+
+    // Real work is still real work, whatever else the session is doing.
+    const working = registry.getActions(createContext({ selectedSession: testSession({ persisted: true }), status: testStatus({ persisted: true, isStreaming: true }), activity: startupActivity }).context);
+    expect(working.find((action) => action.id === "core:session.stop")?.enabled).toBe(true);
+    expect(working.find((action) => action.id === "core:session.reload")?.enabled).toBe(false);
   });
 
   it("routes session reload through the runtime context", () => {
     const registry = new PluginRegistry();
     registry.register({ id: "core", plugin: corePlugin });
-    const { context, calls } = createContext({ selectedSession: testSession({ persisted: true }), machineRuntimes: { local: { machineId: "local", ok: true, checkedAt: "now", capabilities: [PI_WEB_CAPABILITIES.sessionsReload] } } });
+    const { context, calls } = createContext({ selectedSession: testSession({ persisted: true }) });
     const action = registry.getActions(context).find((candidate) => candidate.id === "core:session.reload");
 
     if (action !== undefined) void action.run();
@@ -269,6 +276,34 @@ describe("PluginRegistry", () => {
     if (action !== undefined) void action.run();
 
     expect(calls).toEqual(["deleteCachedNewSession"]);
+  });
+
+  it("exposes model and thinking selectors as configurable actions for writable sessions", () => {
+    const registry = new PluginRegistry();
+    registry.register({ id: "core", plugin: corePlugin });
+
+    const unavailable = registry.getActions(createContext().context);
+    expect(unavailable.find((action) => action.id === "core:model.select")?.enabled).toBe(false);
+    expect(unavailable.find((action) => action.id === "core:thinking.select")?.enabled).toBe(false);
+
+    const archivedSession = { ...testSession(), archived: true, archivedAt: "2026-05-20T00:00:00.000Z" };
+    const archived = registry.getActions(createContext({ selectedSession: archivedSession }).context);
+    expect(archived.find((action) => action.id === "core:model.select")?.enabled).toBe(false);
+    expect(archived.find((action) => action.id === "core:thinking.select")?.enabled).toBe(false);
+
+    const { context, calls } = createContext({ selectedSession: testSession() });
+    const actions = registry.getActions(context);
+    const modelAction = actions.find((action) => action.id === "core:model.select");
+    const thinkingAction = actions.find((action) => action.id === "core:thinking.select");
+    expect(modelAction).toMatchObject({ title: "Select Model", enabled: true });
+    expect(modelAction?.shortcut).toBeUndefined();
+    expect(thinkingAction).toMatchObject({ title: "Select Thinking Level", enabled: true });
+    expect(thinkingAction?.shortcut).toBeUndefined();
+
+    if (modelAction !== undefined) void modelAction.run();
+    if (thinkingAction !== undefined) void thinkingAction.run();
+
+    expect(calls).toEqual(["openModelPicker", "openThinkingLevelPicker"]);
   });
 
   it("routes refresh current to the active core workspace panel", () => {
@@ -415,7 +450,7 @@ describe("PluginRegistry", () => {
       context.host.requestRender();
       return [{ type: "text", text: context.machine.id }];
     });
-    const context = createWorkspaceLabelContext("remote-1", workspace, { files: { readFile, writeFile: vi.fn<WorkspaceFiles["writeFile"]>(() => Promise.resolve(testWriteFileResponse())), deleteFile: vi.fn<WorkspaceFiles["deleteFile"]>(() => Promise.resolve(testDeleteFileResponse())), moveFile: vi.fn<WorkspaceFiles["moveFile"]>(() => Promise.resolve(testMoveFileResponse())) }, host: { requestRender } });
+    const context = createWorkspaceLabelContext("remote-1", workspace, { files: { readFile, listFiles: vi.fn<WorkspaceFiles["listFiles"]>(() => Promise.resolve(testFileTreeResponse())), writeFile: vi.fn<WorkspaceFiles["writeFile"]>(() => Promise.resolve(testWriteFileResponse())), deleteFile: vi.fn<WorkspaceFiles["deleteFile"]>(() => Promise.resolve(testDeleteFileResponse())), moveFile: vi.fn<WorkspaceFiles["moveFile"]>(() => Promise.resolve(testMoveFileResponse())) }, host: { requestRender } });
 
     registry.register({
       id: "example",
@@ -621,11 +656,11 @@ describe("PluginRegistry", () => {
 });
 
 function testWorkspace(patch: Partial<Workspace> = {}): Workspace {
-  return { id: "w1", projectId: "p1", path: "/tmp/project", label: "main", isMain: true, isGitRepo: true, isGitWorktree: false, ...patch };
+  return { id: "w1", projectId: "p1", path: "/tmp/project", label: "main", isMain: true, isGitRepo: true, isGitWorktree: false, effectiveConfig: {}, ...patch };
 }
 
 function createWorkspaceLabelContext(machineId: string, workspace = testWorkspace(), helpers: Partial<Pick<WorkspaceLabelContext, "files" | "host">> = {}): WorkspaceLabelContext {
-  const files: WorkspaceFiles = helpers.files ?? { readFile: vi.fn<WorkspaceFiles["readFile"]>(() => Promise.resolve(testFileContent())), writeFile: vi.fn<WorkspaceFiles["writeFile"]>(() => Promise.resolve(testWriteFileResponse())), deleteFile: vi.fn<WorkspaceFiles["deleteFile"]>(() => Promise.resolve(testDeleteFileResponse())), moveFile: vi.fn<WorkspaceFiles["moveFile"]>(() => Promise.resolve(testMoveFileResponse())) };
+  const files: WorkspaceFiles = helpers.files ?? { readFile: vi.fn<WorkspaceFiles["readFile"]>(() => Promise.resolve(testFileContent())), listFiles: vi.fn<WorkspaceFiles["listFiles"]>(() => Promise.resolve(testFileTreeResponse())), writeFile: vi.fn<WorkspaceFiles["writeFile"]>(() => Promise.resolve(testWriteFileResponse())), deleteFile: vi.fn<WorkspaceFiles["deleteFile"]>(() => Promise.resolve(testDeleteFileResponse())), moveFile: vi.fn<WorkspaceFiles["moveFile"]>(() => Promise.resolve(testMoveFileResponse())) };
   const host: WorkspaceHost = helpers.host ?? { requestRender: vi.fn<WorkspaceHost["requestRender"]>() };
   return {
     machine: { id: machineId, name: machineId, kind: machineId === "local" ? "local" : "remote" },
@@ -642,7 +677,7 @@ function createWorkspacePanelContext(machineId: string, prompt: WorkspacePanelCo
     machine: { id: machineId, name: machineId, kind: machineId === "local" ? "local" : "remote" },
     workspace,
     state: { ...initialAppState(), selectedMachine: testMachine(machineId) },
-    files: { readFile: vi.fn(), writeFile: vi.fn(), deleteFile: vi.fn(), moveFile: vi.fn() },
+    files: { readFile: vi.fn(), listFiles: vi.fn(), writeFile: vi.fn(), deleteFile: vi.fn(), moveFile: vi.fn() },
     prompt,
     terminal: { open: vi.fn(), runCommand: vi.fn() },
     host: { requestRender: vi.fn() },
@@ -695,6 +730,15 @@ function testStatus(patch: Partial<SessionStatus> = {}): SessionStatus {
     tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     cost: 0,
     ...patch,
+  };
+}
+
+function testFileTreeResponse(path = ".pi-web/relays"): FileTreeResponse {
+  return {
+    path,
+    entries: [],
+    scannedAt: "2026-05-20T00:00:00.000Z",
+    truncated: false,
   };
 }
 

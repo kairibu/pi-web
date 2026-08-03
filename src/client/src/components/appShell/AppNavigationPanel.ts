@@ -4,7 +4,9 @@ import type { Machine, MachineHealth, Project, SessionActivity, SessionInfo, Ses
 import type { WorkspaceLabelItem } from "../../plugins/types";
 import type { NavigationSection } from "../../appShell/navigationState";
 import { NAVIGATION_SECTION_ORDER } from "../../appShell/navigationState";
+import { EMPTY_UNREAD_PRESENCE, type UnreadPresence } from "../../unreadPresence";
 import type { KeyboardNavigableSection } from "../navigationFocus";
+import type { ParentSessionLocation } from "../../parentSessionLocation";
 import "../MachineList";
 import "../MachineSwitcher";
 import "../ProjectList";
@@ -29,6 +31,8 @@ export class AppNavigationPanel extends LitElement {
   @property({ attribute: false }) sessionActivities: Record<string, SessionActivity> = {};
   @property({ attribute: false }) sessionStatuses: Record<string, SessionStatus> = {};
   @property({ attribute: false }) sendingPrompts: Record<string, true> = {};
+  @property({ attribute: false }) unreadSessionIds: ReadonlySet<string> = new Set();
+  @property({ attribute: false }) unreadPresence: UnreadPresence = EMPTY_UNREAD_PRESENCE;
   @property({ attribute: false }) workspacesByProjectId: Record<string, Workspace[]> = {};
   @property({ attribute: false }) deletingWorkspaceIds: string[] = [];
   @property({ attribute: false }) workspaceLabelItems: (workspace: Workspace) => WorkspaceLabelItem[] = () => [];
@@ -41,12 +45,6 @@ export class AppNavigationPanel extends LitElement {
   @property({ type: Boolean }) sessionsCollapsed = false;
   @property({ type: Number }) startingSessionCount = 0;
   @property({ type: Boolean }) canStartSession = false;
-  @property({ type: Boolean }) canDeleteArchivedSessions = false;
-  @property({ type: Boolean }) canReloadSessions = false;
-  @property({ type: Boolean }) canCleanupSessions = false;
-  @property({ type: Boolean }) authoritativeSessionPersistence = false;
-  @property({ type: String }) archivedDeleteUnavailableMessage = "Update and restart Pi-Web on this machine to delete archived sessions.";
-  @property({ type: String }) cleanupUnavailableMessage = "Update and restart Pi-Web on this machine to clean up sessions.";
   @property({ attribute: false }) onShowActions?: () => void;
   @property({ attribute: false }) onToggleMachines?: () => void;
   @property({ attribute: false }) onToggleProjects?: () => void;
@@ -66,6 +64,10 @@ export class AppNavigationPanel extends LitElement {
   @property({ attribute: false }) onDeleteArchivedSession?: (session: SessionInfo) => void | Promise<void>;
   @property({ attribute: false }) onDeleteArchivedSessions?: (sessions: SessionInfo[]) => void | Promise<void>;
   @property({ attribute: false }) onDetachParentSession?: (session: SessionInfo) => void | Promise<void>;
+  @property({ attribute: false }) parentSessionLocation?: (session: SessionInfo) => ParentSessionLocation;
+  @property({ attribute: false }) onGoToParentSession?: (session: SessionInfo, location: ParentSessionLocation) => void | Promise<void>;
+  @property({ attribute: false }) onMarkSessionRead?: (session: SessionInfo) => void | Promise<void>;
+  @property({ attribute: false }) onMarkSessionsRead?: (sessions: SessionInfo[]) => void | Promise<void>;
   @property({ attribute: false }) onReloadSession?: (session: SessionInfo) => void | Promise<void>;
   @property({ attribute: false }) onCleanupSessions?: () => void | Promise<void>;
   @property({ attribute: false }) onArchivedCollapsed?: () => void | Promise<void>;
@@ -100,6 +102,7 @@ export class AppNavigationPanel extends LitElement {
             .selected=${this.selectedMachine}
             .statuses=${this.machineStatuses}
             .activities=${this.machineActivities}
+            .unreadMachineIds=${this.unreadPresence.machines}
             .onSelect=${(machine: Machine) => this.onSelectMachine?.(machine)}
             .onRemove=${(machine: Machine) => this.onRemoveMachine?.(machine)}
             .onFocusNextSection=${() => { this.focusNextFrom("machines"); }}
@@ -117,6 +120,7 @@ export class AppNavigationPanel extends LitElement {
           .selected=${this.selectedMachine}
           .statuses=${this.machineStatuses}
           .activities=${this.machineActivities}
+          .unreadMachineIds=${this.unreadPresence.machines}
           .collapsible=${this.collapsible}
           .collapsed=${this.machinesCollapsed}
           .onToggleCollapsed=${() => { this.onToggleMachines?.(); }}
@@ -131,6 +135,7 @@ export class AppNavigationPanel extends LitElement {
         .selected=${this.selectedProject}
         .activities=${this.workspaceActivities}
         .workspacesByProjectId=${this.workspacesByProjectId}
+        .unreadProjectIds=${this.unreadPresence.projects}
         .collapsible=${this.collapsible}
         .collapsed=${this.projectsCollapsed}
         .onToggleCollapsed=${() => { this.onToggleProjects?.(); }}
@@ -145,6 +150,7 @@ export class AppNavigationPanel extends LitElement {
         .selected=${this.selectedWorkspace}
         .activities=${this.workspaceActivities}
         .deletingWorkspaceIds=${this.deletingWorkspaceIds}
+        .unreadWorkspaceIds=${this.unreadPresence.workspaces}
         .collapsible=${this.collapsible}
         .collapsed=${this.workspacesCollapsed}
         .workspaceLabelItems=${this.workspaceLabelItems}
@@ -160,15 +166,10 @@ export class AppNavigationPanel extends LitElement {
         .statuses=${this.sessionStatuses}
         .activities=${this.sessionActivities}
         .sending=${this.sendingPrompts}
+        .unreadSessionIds=${this.unreadSessionIds}
         .selected=${this.selectedSession}
         .startingCount=${this.startingSessionCount}
         .canStart=${this.canStartSession}
-        .canDeleteArchived=${this.canDeleteArchivedSessions}
-        .canReload=${this.canReloadSessions}
-        .canCleanup=${this.canCleanupSessions}
-        .authoritativeSessionPersistence=${this.authoritativeSessionPersistence}
-        .archivedDeleteUnavailableMessage=${this.archivedDeleteUnavailableMessage}
-        .cleanupUnavailableMessage=${this.cleanupUnavailableMessage}
         .collapsible=${this.collapsible}
         .collapsed=${this.sessionsCollapsed}
         .onToggleCollapsed=${() => { this.onToggleSessions?.(); }}
@@ -183,6 +184,10 @@ export class AppNavigationPanel extends LitElement {
         .onDeleteArchived=${(session: SessionInfo) => this.onDeleteArchivedSession?.(session)}
         .onDeleteArchivedMany=${(sessions: SessionInfo[]) => this.onDeleteArchivedSessions?.(sessions)}
         .onDetachParent=${(session: SessionInfo) => this.onDetachParentSession?.(session)}
+        .parentLocation=${this.parentSessionLocation ?? unknownParentSessionLocation}
+        .onGoToParent=${this.onGoToParentSession === undefined ? undefined : (session: SessionInfo, location: ParentSessionLocation) => this.onGoToParentSession?.(session, location)}
+        .onMarkRead=${(session: SessionInfo) => this.onMarkSessionRead?.(session)}
+        .onMarkReadMany=${(sessions: SessionInfo[]) => this.onMarkSessionsRead?.(sessions)}
         .onReload=${(session: SessionInfo) => this.onReloadSession?.(session)}
         .onCleanup=${() => this.onCleanupSessions?.()}
         .onFocusPreviousSection=${() => { this.focusPreviousFrom("sessions"); }}
@@ -235,6 +240,9 @@ export class AppNavigationPanel extends LitElement {
     button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
   `;
 }
+
+/** Stable default so the session list does not see a new resolver identity each render. */
+const unknownParentSessionLocation = (): ParentSessionLocation => ({ kind: "unknown" });
 
 export function shouldShowMachinesSection(machines: readonly Machine[]): boolean {
   return machines.length > 1;

@@ -4,7 +4,7 @@ import type { TerminalCommandRun } from "../../shared/apiTypes.js";
 import { ProjectService } from "../projects/projectService.js";
 import type { SessionProxyDaemon } from "../sessiond/sessionProxyRoutes.js";
 import { ProjectStore } from "../storage/projectStore.js";
-import type { Project, Workspace } from "../types.js";
+import type { Project, WorkspaceListing } from "../types.js";
 import { registerWorkspaceDeletionRoutes } from "./workspaceDeletionRoutes.js";
 import { WorkspaceService } from "./workspaceService.js";
 
@@ -19,7 +19,7 @@ const project: Project = {
   createdAt: "2026-05-25T00:00:00.000Z",
 };
 
-const mainWorkspace: Workspace = {
+const mainWorkspace: WorkspaceListing = {
   id: "main",
   projectId: project.id,
   path: "/repo",
@@ -30,7 +30,7 @@ const mainWorkspace: Workspace = {
   isGitWorktree: true,
 };
 
-const targetWorkspace: Workspace = {
+const targetWorkspace: WorkspaceListing = {
   id: "feature",
   projectId: project.id,
   path: "/repo/feature path",
@@ -109,7 +109,7 @@ function fakeProjects(): ProjectService {
   return new FakeProjectService();
 }
 
-function fakeWorkspaces(workspaces: Workspace[]): WorkspaceService {
+function fakeWorkspaces(workspaces: WorkspaceListing[]): WorkspaceService {
   return new FakeWorkspaceService(workspaces);
 }
 
@@ -124,11 +124,11 @@ class FakeProjectService extends ProjectService {
 }
 
 class FakeWorkspaceService extends WorkspaceService {
-  constructor(private readonly workspaces: Workspace[]) {
+  constructor(private readonly workspaces: WorkspaceListing[]) {
     super();
   }
 
-  override list(): Promise<Workspace[]> {
+  override list(): Promise<WorkspaceListing[]> {
     return Promise.resolve(this.workspaces);
   }
 }

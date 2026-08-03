@@ -1,18 +1,27 @@
 import { createHash } from "node:crypto";
-import type { Project } from "../types.js";
-import type { Workspace } from "../types.js";
-import { discoverGitWorktrees, isGitRepository } from "./gitWorktreeDiscovery.js";
+import type { Project, WorkspaceListing } from "../types.js";
+import { discoverGitWorktrees, isGitRepository, type GitWorktreeInfo } from "./gitWorktreeDiscovery.js";
 
 const idFor = (value: string) => createHash("sha1").update(value).digest("hex").slice(0, 12);
 
+/** The git facts this service needs, injectable so workspace policy is testable without a real repo. */
+export interface WorkspaceGitPort {
+  isGitRepository(path: string): Promise<boolean>;
+  discoverGitWorktrees(path: string): Promise<GitWorktreeInfo[]>;
+}
+
+const realGit: WorkspaceGitPort = { isGitRepository, discoverGitWorktrees };
+
 export class WorkspaceService {
-  async list(project: Project): Promise<Workspace[]> {
-    const isGitRepo = await isGitRepository(project.path);
+  constructor(private readonly git: WorkspaceGitPort = realGit) {}
+
+  async list(project: Project): Promise<WorkspaceListing[]> {
+    const isGitRepo = await this.git.isGitRepository(project.path);
     if (!isGitRepo) {
       return [this.single(project, false)];
     }
 
-    const worktrees = await discoverGitWorktrees(project.path);
+    const worktrees = this.selectable(await this.git.discoverGitWorktrees(project.path), project);
     if (worktrees.length === 0) return [this.single(project, true)];
 
     return worktrees.map((worktree) => {
@@ -30,7 +39,17 @@ export class WorkspaceService {
     });
   }
 
-  private single(project: Project, isGitRepo: boolean): Workspace {
+  /**
+   * Git keeps listing a linked worktree after its checkout directory is deleted outside PI WEB,
+   * marking it `prunable`. Such an entry is not a usable workspace, so it is hidden rather than
+   * offered as a selectable ghost. Listing stays read-only: we never run `git worktree prune`.
+   * The project's own path is always kept so a project cannot end up with no workspace at all.
+   */
+  private selectable(worktrees: GitWorktreeInfo[], project: Project): GitWorktreeInfo[] {
+    return worktrees.filter((worktree) => worktree.prunable !== true || worktree.path === project.path);
+  }
+
+  private single(project: Project, isGitRepo: boolean): WorkspaceListing {
     return {
       id: idFor(`${project.id}:${project.path}`),
       projectId: project.id,

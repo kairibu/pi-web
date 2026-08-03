@@ -69,7 +69,7 @@ async function proxySelectedMachineConfigRequest(client: MachineClient, machineI
   }
 
   if (method === "PUT") {
-    const patch = parseSelectedMachineConfigRequest(configPayload(body));
+    const patch = parseSelectedMachineConfigRequest(configPayload(body), "portable");
     const currentResponse = await client.requestJson("GET", remotePath);
     if (!isSuccessfulStatus(currentResponse.statusCode)) return sendUpstreamJsonResponse(reply, currentResponse, machineId);
 
@@ -87,9 +87,10 @@ function configPayload(body: unknown): unknown {
 
 function sendSelectedMachineConfigResponse(reply: FastifyReply, upstream: MachineJsonResponse, machineId: string): FastifyReply {
   if (!isSuccessfulStatus(upstream.statusCode)) return sendUpstreamJsonResponse(reply, upstream, machineId);
+  const response = parsePiWebConfigResponseBody(upstream.body, "Remote machine config response");
   reply.code(upstream.statusCode);
   applySafeHeaders(reply, upstream.headers);
-  return reply.send(selectedMachineConfigResponse(parsePiWebConfigResponseBody(upstream.body, "Remote machine config response")));
+  return reply.send(selectedMachineConfigResponse(response));
 }
 
 function sendUpstreamJsonResponse(reply: FastifyReply, upstream: MachineJsonResponse, machineId: string): FastifyReply {

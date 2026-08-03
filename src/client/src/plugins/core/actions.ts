@@ -1,8 +1,6 @@
 import { isSessionActive } from "../../../../shared/activity";
-import { PI_WEB_CAPABILITIES, supportsPiWebCapability, type PiWebCapability } from "../../../../shared/capabilities";
 import type { AppState } from "../../appState";
-import { selectedMachineId } from "../../controllers/types";
-import { isArchivableSessionInfo, isTransientNewSessionInfo, sessionPersistenceOptionsForRuntime } from "../../sessionPersistence";
+import { isArchivableSessionInfo, isTransientNewSessionInfo } from "../../sessionPersistence";
 import { isWorkspaceDeletionPending } from "../../workspaceDeletion";
 import type { PluginAction } from "../types";
 
@@ -168,6 +166,22 @@ export function createCoreActions(): PluginAction[] {
       run: (context) => context.startSession(),
     },
     {
+      id: "model.select",
+      title: "Select Model",
+      description: "Choose the model for the selected session",
+      group: "Session",
+      enabled: hasSelectableSession,
+      run: (context) => context.openModelPicker(),
+    },
+    {
+      id: "thinking.select",
+      title: "Select Thinking Level",
+      description: "Choose the thinking level for the selected session",
+      group: "Session",
+      enabled: hasSelectableSession,
+      run: (context) => context.openThinkingLevelPicker(),
+    },
+    {
       id: "session.archive",
       title: "Archive Session",
       description: "Archive the selected session",
@@ -181,7 +195,6 @@ export function createCoreActions(): PluginAction[] {
       description: "Close and re-open the selected session from its session file. Use /reload in the prompt for Pi runtime resources.",
       group: "Session",
       enabled: hasReloadableSession,
-      disabledReason: reloadSessionDisabledReason,
       run: (context) => context.reloadSession(),
     },
     {
@@ -216,32 +229,20 @@ function hasDeletableWorkspace(context: { state: AppState }): boolean {
   return workspace !== undefined && workspace.isGitWorktree && !workspace.isMain && !isWorkspaceDeletionPending(context.state, workspace);
 }
 
+function hasSelectableSession(context: { state: AppState }): boolean {
+  const session = context.state.selectedSession;
+  return session !== undefined && session.archived !== true;
+}
+
 function hasArchivableSession(context: { state: AppState }): boolean {
-  return isArchivableSessionInfo(context.state.selectedSession, context.state.status, sessionPersistenceOptions(context.state));
+  return isArchivableSessionInfo(context.state.selectedSession, context.state.status);
 }
 
 function hasTransientNewSession(context: { state: AppState }): boolean {
-  return isTransientNewSessionInfo(context.state.selectedSession, context.state.status, sessionPersistenceOptions(context.state));
+  return isTransientNewSessionInfo(context.state.selectedSession, context.state.status);
 }
 
 function hasReloadableSession(context: { state: AppState }): boolean {
-  if (!isArchivableSessionInfo(context.state.selectedSession, context.state.status, sessionPersistenceOptions(context.state))) return false;
-  if (reloadSessionDisabledReason(context) !== undefined) return false;
+  if (!isArchivableSessionInfo(context.state.selectedSession, context.state.status)) return false;
   return !isSessionActive(context.state.status, context.state.activity);
-}
-
-function reloadSessionDisabledReason(context: { state: AppState }): string | undefined {
-  if (!isArchivableSessionInfo(context.state.selectedSession, context.state.status, sessionPersistenceOptions(context.state))) return undefined;
-  if (isSessionActive(context.state.status, context.state.activity)) return undefined;
-  return missingCapabilityReason(context.state, PI_WEB_CAPABILITIES.sessionsReload, "reload sessions from disk");
-}
-
-function sessionPersistenceOptions(state: AppState) {
-  return sessionPersistenceOptionsForRuntime(state.machineRuntimes[selectedMachineId(state)]);
-}
-
-function missingCapabilityReason(state: AppState, capability: PiWebCapability, action: string): string | undefined {
-  const runtime = state.machineRuntimes[selectedMachineId(state)];
-  if (runtime?.ok === true && supportsPiWebCapability(runtime, capability)) return undefined;
-  return `Update and restart Pi-Web on ${state.selectedMachine?.name ?? "this machine"} to ${action}.`;
 }

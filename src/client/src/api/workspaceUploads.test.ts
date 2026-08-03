@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   effectiveWorkspaceUploadFolder,
   uploadWorkspaceFile,
@@ -12,12 +12,20 @@ import {
   type WorkspaceUploadXhr,
 } from "./workspaceUploads";
 
+beforeEach(() => {
+  vi.stubGlobal("document", { baseURI: "https://pi.example.test/" });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe("workspace upload helpers", () => {
   it("resolves effective upload defaults and workspace-relative paths", () => {
     expect(effectiveWorkspaceUploadFolder(undefined)).toBe(".pi-web/uploads");
     expect(effectiveWorkspaceUploadFolder({ uploads: { defaultFolder: "manual/uploads" } })).toBe("manual/uploads");
     expect(workspaceEffectiveUploadFolder({ uploads: { defaultFolder: "project/uploads" } }, "global/uploads")).toBe("project/uploads");
-    expect(workspaceEffectiveUploadFolder(undefined, "global/uploads")).toBe("global/uploads");
+    expect(workspaceEffectiveUploadFolder({}, "global/uploads")).toBe("global/uploads");
     expect(workspaceUploadPath(" uploads\\manual// ", "./report.txt")).toBe("uploads/manual/report.txt");
     expect(workspaceUploadPath("", "report.txt")).toBe("report.txt");
 
@@ -40,7 +48,7 @@ describe("workspace upload helpers", () => {
 
     const xhr = xhrs.only();
     expect(xhr.method).toBe("PUT");
-    expect(xhr.url).toBe("/api/machines/remote%20a/projects/p%201/workspaces/w%2F1/file?path=manual%2Fhello.txt&overwrite=false");
+    expect(xhr.url).toBe("https://pi.example.test/api/machines/remote%20a/projects/p%201/workspaces/w%2F1/file?path=manual%2Fhello.txt&overwrite=false");
     expect(xhr.headers.get("content-type")).toBe("text/plain");
     expect(xhr.body).toBe(file);
 
@@ -78,13 +86,13 @@ describe("workspace upload helpers", () => {
     });
 
     const first = xhrs.at(0);
-    expect(first.url).toBe("/api/machines/remote%20a/projects/p%201/workspaces/w%2F1/file?path=uploads%2Fmanual%2Fa.txt");
+    expect(first.url).toBe("https://pi.example.test/api/machines/remote%20a/projects/p%201/workspaces/w%2F1/file?path=uploads%2Fmanual%2Fa.txt");
     first.emitUploadProgress(1, 2);
     first.respondJson(200, { path: "uploads/manual/a.txt", size: 2, modifiedAt: "2026-06-25T00:00:00.000Z", created: true });
     await Promise.resolve();
 
     const second = xhrs.at(1);
-    expect(second.url).toBe("/api/machines/remote%20a/projects/p%201/workspaces/w%2F1/file?path=uploads%2Fmanual%2Fb.txt");
+    expect(second.url).toBe("https://pi.example.test/api/machines/remote%20a/projects/p%201/workspaces/w%2F1/file?path=uploads%2Fmanual%2Fb.txt");
     second.emitUploadProgress(3, 3);
     second.respondJson(200, { path: "uploads/manual/b.txt", size: 3, modifiedAt: "2026-06-25T00:00:01.000Z", created: true });
 
@@ -98,6 +106,43 @@ describe("workspace upload helpers", () => {
       { path: "uploads/manual/a.txt", loaded: 2, total: 2, done: true },
       { path: "uploads/manual/b.txt", loaded: 3, total: 3, done: true },
     ]);
+  });
+
+  it("forwards createDirs through batch upload requests", async () => {
+    const xhrs = new FakeXhrQueue();
+    const file = new File(["hello"], "nested.txt", { type: "text/plain" });
+
+    const task = uploadWorkspaceFiles("p1", "w1", [file], {
+      destinationFolder: "uploads",
+      createDirs: false,
+      xhrFactory: xhrs.factory,
+    });
+
+    const xhr = xhrs.only();
+    expect(xhr.url).toBe("https://pi.example.test/api/machines/local/projects/p1/workspaces/w1/file?path=uploads%2Fnested.txt&createDirs=false");
+    xhr.respondJson(200, { path: "uploads/nested.txt", size: 5, modifiedAt: "2026-06-25T00:00:00.000Z", created: true });
+
+    await expect(task.promise).resolves.toEqual([
+      { path: "uploads/nested.txt", size: 5, modifiedAt: "2026-06-25T00:00:00.000Z", created: true },
+    ]);
+  });
+
+  it("cancels an in-flight batch upload without starting remaining files", async () => {
+    const xhrs = new FakeXhrQueue();
+    const files = [new File(["ab"], "a.txt"), new File(["cde"], "b.txt")];
+
+    const task = uploadWorkspaceFiles("p1", "w1", files, {
+      destinationFolder: "uploads",
+      xhrFactory: xhrs.factory,
+    });
+    const first = xhrs.only();
+    const cancellation = expect(task.promise).rejects.toBeInstanceOf(WorkspaceUploadCancelledError);
+
+    task.cancel();
+
+    await cancellation;
+    expect(first.aborted).toBe(true);
+    expect(xhrs.count()).toBe(1);
   });
 
   it("continues batch uploads after per-file failures and reports the failed file only", async () => {
@@ -145,6 +190,10 @@ class FakeXhrQueue {
 
   at(index: number): FakeXMLHttpRequest {
     return this.instances[index] ?? failTest(`missing XHR instance ${String(index)}`);
+  }
+
+  count(): number {
+    return this.instances.length;
   }
 }
 

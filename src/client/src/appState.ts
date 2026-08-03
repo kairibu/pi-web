@@ -1,6 +1,7 @@
-import type { AuthProviderOption, CommandOption, CommandResult, FileContentResponse, FileTreeEntry, GitDiffResponse, GitStatusResponse, Machine, MachineHealth, MachineRuntime, OAuthFlowState, PiWebStatusResponse, Project, QueuedSessionMessage, SessionActivity, SessionInfo, SessionStatus, TerminalCommandRun, Workspace, WorkspaceActivity } from "./api";
+import type { AuthProviderOption, CommandOption, CommandResult, ExtensionDialogAnswer, ExtensionDialogCloseReason, FileContentResponse, FileTreeEntry, GitDiffResponse, GitStatusResponse, Machine, MachineHealth, MachineRuntime, OAuthFlowState, PendingAskUser, PendingExtensionDialog, PiWebStatusResponse, Project, QueuedSessionMessage, SessionActivity, SessionInfo, SessionStatus, SessionTreeSnapshot, TerminalCommandRun, Workspace, WorkspaceActivity } from "./api";
 import type { ChatLine } from "./components/shared";
 import type { QualifiedContributionId } from "./plugins/ids";
+import type { SelectedSessionNotificationInbox } from "./sessionNotifications";
 import type { WorkspaceUploadBatchState } from "./workspaceUploadState";
 
 export interface AppState {
@@ -17,7 +18,6 @@ export interface AppState {
   messagePageEnd: number;
   messagePageTotal: number;
   isLoadingEarlierMessages: boolean;
-  isReceivingPartialStream: boolean;
   /** Sessions with a prompt upload in flight, keyed by sessionId (client-owned). */
   sendingPrompts: Record<string, true>;
   /** Client-side queued sends waiting for a just-created backend session, keyed by sessionId. */
@@ -31,15 +31,38 @@ export interface AppState {
   selectedSession: SessionInfo | undefined;
   status: SessionStatus | undefined;
   activity: SessionActivity | undefined;
+  /**
+   * The selected session's open `ask_user` question set, derived from the
+   * daemon-owned {@link SessionStatus.pendingAsk} plus live ask events.
+   */
+  pendingAsk: PendingAskUser | undefined;
+  /**
+   * The selected session's open extension dialogs, derived from the
+   * daemon-owned {@link SessionStatus.pendingDialogs} plus live dialog events.
+   * Oldest first; unlike an ask, opening never supersedes, so several dialogs
+   * may wait at once.
+   */
+  pendingDialogs: PendingExtensionDialog[];
+  /**
+   * Dialogs that closed while their session was selected, kept with the close
+   * reason and any answer so the settled card can show what became of the
+   * dialog. The card stays until the user dismisses it. The wire outcome is
+   * deliberately small, so only a browser that saw the dialog open can show
+   * the closed card; deselection and reloads drop these.
+   */
+  closedDialogs: ClosedExtensionDialog[];
   /** Thinking levels available for the selected session's current model. */
   availableThinkingLevels: readonly string[];
   sessionStatuses: Record<string, SessionStatus>;
   sessionActivities: Record<string, SessionActivity>;
   workspaceActivities: Record<string, WorkspaceActivity>;
   machineActivities: Record<string, Record<string, WorkspaceActivity>>;
+  /** Authoritative projection plus browser-local optimistic overlays for the selected inbox. */
+  selectedNotificationInbox: SelectedSessionNotificationInbox | undefined;
   workspacesByProjectId: Record<string, Workspace[]>;
   workspaceDeletionRuns: Record<string, TerminalCommandRun>;
   commandDialog: Extract<CommandResult, { type: "select" }> | undefined;
+  treeDialog: SessionTreeSnapshot | undefined;
   modelDialog: { title: string; options: CommandOption[]; selectedValue?: string } | undefined;
   thinkingDialog: { title: string; options: CommandOption[]; selectedValue?: string } | undefined;
   themeDialog: { title: string; options: CommandOption[]; selectedValue?: string } | undefined;
@@ -67,17 +90,26 @@ export interface AppState {
   error: string;
 }
 
+/** A closed extension dialog paired with the record the browser rendered while it was open. */
+export interface ClosedExtensionDialog {
+  dialog: PendingExtensionDialog;
+  reason: ExtensionDialogCloseReason;
+  /** Present only when `reason` is `"answered"`. */
+  answer?: ExtensionDialogAnswer;
+}
+
 export type AuthDialogState =
   | { step: "method" }
   | { step: "providers"; mode: "login"; authType?: "oauth" | "api_key"; providers: AuthProviderOption[] }
-  | { step: "apiKey"; provider: AuthProviderOption; value: string; saving?: boolean; error?: string }
-  | { step: "oauth"; flow: OAuthFlowState; responding?: boolean; inputValue?: string; error?: string }
+  | { step: "oauth"; flow: OAuthFlowState; machineId: string; responding?: boolean; inputValue?: string; error?: string }
   | { step: "logout"; providers: AuthProviderOption[] };
 
 export type WorkspaceScopedStateReset = Pick<AppState,
   | "sessions"
   | "clientQueuedSessionMessages"
   | "startingSessionCount"
+  | "selectedNotificationInbox"
+  | "treeDialog"
   | "fileTree"
   | "expandedDirs"
   | "selectedFilePath"
@@ -97,6 +129,8 @@ export function resetWorkspaceScopedState(): WorkspaceScopedStateReset {
     sessions: [],
     clientQueuedSessionMessages: {},
     startingSessionCount: 0,
+    selectedNotificationInbox: undefined,
+    treeDialog: undefined,
     fileTree: [],
     expandedDirs: {},
     selectedFilePath: undefined,
@@ -127,7 +161,6 @@ export function initialAppState(): AppState {
     messagePageEnd: 0,
     messagePageTotal: 0,
     isLoadingEarlierMessages: false,
-    isReceivingPartialStream: false,
     sendingPrompts: {},
     clientQueuedSessionMessages: {},
     startingSessionCount: 0,
@@ -138,14 +171,19 @@ export function initialAppState(): AppState {
     selectedSession: undefined,
     status: undefined,
     activity: undefined,
+    pendingAsk: undefined,
+    pendingDialogs: [],
+    closedDialogs: [],
     availableThinkingLevels: [],
     sessionStatuses: {},
     sessionActivities: {},
     workspaceActivities: {},
     machineActivities: {},
+    selectedNotificationInbox: undefined,
     workspacesByProjectId: {},
     workspaceDeletionRuns: {},
     commandDialog: undefined,
+    treeDialog: undefined,
     modelDialog: undefined,
     thinkingDialog: undefined,
     themeDialog: undefined,

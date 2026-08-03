@@ -1,7 +1,7 @@
 import { LitElement, css, html } from "lit";
 import { customElement, property, query } from "lit/decorators.js";
 import type { AuthDialogState } from "../appState";
-import type { AuthProviderOption } from "../api";
+import type { AuthProviderOption, OAuthFlowState } from "../api";
 import { commandPickerStyles } from "./shared";
 
 @customElement("auth-dialog")
@@ -9,8 +9,6 @@ export class AuthDialog extends LitElement {
   @property({ attribute: false }) state?: AuthDialogState;
   @property({ attribute: false }) onChooseMethod?: (authType: "oauth" | "api_key") => void;
   @property({ attribute: false }) onSelectProvider?: (providerId: string, authType: "oauth" | "api_key") => void;
-  @property({ attribute: false }) onApiKeyInput?: (value: string) => void;
-  @property({ attribute: false }) onSaveApiKey?: () => void;
   @property({ attribute: false }) onLogoutProvider?: (providerId: string) => void;
   @property({ attribute: false }) onOAuthInput?: (value: string) => void;
   @property({ attribute: false }) onOAuthRespond?: (value?: string) => void;
@@ -42,8 +40,7 @@ export class AuthDialog extends LitElement {
   private dialogTitle(state: AuthDialogState): string {
     switch (state.step) {
       case "method": return "Configure provider authentication";
-      case "providers": return state.authType === undefined ? "Select provider authentication" : state.authType === "oauth" ? "Select subscription provider" : "Select API key provider";
-      case "apiKey": return `API key for ${state.provider.name}`;
+      case "providers": return state.authType === undefined ? "Select provider authentication" : state.authType === "oauth" ? "Select subscription provider" : "Select credential provider";
       case "oauth": return `Login to ${state.flow.providerName}`;
       case "logout": return "Remove stored provider authentication";
     }
@@ -54,18 +51,10 @@ export class AuthDialog extends LitElement {
       case "method": return html`
         <div class="options">
           <button @click=${() => { this.onChooseMethod?.("oauth"); }}><span>Use a subscription</span><small>ChatGPT Plus/Pro, Claude Pro/Max, or GitHub Copilot</small></button>
-          <button @click=${() => { this.onChooseMethod?.("api_key"); }}><span>Use an API key</span><small>Store an API key in pi auth.json</small></button>
+          <button @click=${() => { this.onChooseMethod?.("api_key"); }}><span>Use provider credentials</span><small>Configure an API key or provider-specific credentials in the active Pi-compatible profile's auth.json</small></button>
         </div>
       `;
       case "providers": return html`<div class="options">${state.providers.length === 0 ? html`<div class="empty">No providers available.</div>` : state.providers.map((provider) => this.renderProviderButton(provider))}</div>`;
-      case "apiKey": return html`
-        <div class="form">
-          <p>Enter the API key for <strong>${state.provider.name}</strong>. It will be stored by pi in <code>auth.json</code>.</p>
-          <input type="password" autocomplete="off" placeholder="API key" .value=${state.value} @input=${(event: Event) => { if (event.target instanceof HTMLInputElement) this.onApiKeyInput?.(event.target.value); }}>
-          ${state.error !== undefined && state.error !== "" ? html`<div class="error-text">${state.error}</div>` : null}
-          <div class="actions"><button @click=${() => { this.cancel(); }}>Cancel</button><button class="primary" ?disabled=${state.saving === true} @click=${() => { this.onSaveApiKey?.(); }}>${state.saving === true ? "Saving…" : "Save API key"}</button></div>
-        </div>
-      `;
       case "oauth": return this.renderOAuth(state);
       case "logout": return html`<div class="options">${state.providers.length === 0 ? html`<div class="empty">No stored credentials. Environment variables and models.json settings are unchanged.</div>` : state.providers.map((provider) => html`
         <button @click=${() => { this.onLogoutProvider?.(provider.id); }}><span>${provider.name}</span><small>${provider.id} · ${authTypeLabel(provider.authType)}</small></button>
@@ -86,22 +75,35 @@ export class AuthDialog extends LitElement {
     const flow = state.flow;
     const prompt = flow.prompt;
     const select = flow.select;
+    const promptInputType = prompt === undefined ? undefined : oauthPromptInputType(prompt.promptType);
     return html`
       <div class="form">
         ${flow.auth !== undefined ? html`
           <p>Open this authorization link:</p>
           <p><a href=${flow.auth.url} target="_blank" rel="noreferrer">${flow.auth.url}</a></p>
-          ${flow.auth.instructions !== undefined ? html`<p class="warning">${flow.auth.instructions}</p>` : null}
+          ${flow.auth.deviceCode !== undefined ? html`
+            <p class="warning">Enter code: <code>${flow.auth.deviceCode.userCode}</code></p>
+          ` : flow.auth.instructions !== undefined ? html`<p class="warning">${flow.auth.instructions}</p>` : null}
         ` : html`<p>Starting login flow…</p>`}
         ${flow.progress.length > 0 ? html`<ul class="progress">${flow.progress.map((line) => html`<li>${line}</li>`)}</ul>` : null}
+        ${flow.info?.map((item) => item.links === undefined || item.links.length === 0 ? null : html`
+          <div class="info-links" aria-label="Related information">
+            ${item.links.map((link) => html`<a href=${link.url} target="_blank" rel="noreferrer" title=${item.message}>${link.label ?? link.url}</a>`)}
+          </div>
+        `) ?? null}
         ${prompt !== undefined ? html`
           <label>${prompt.message}</label>
-          <input .value=${state.inputValue ?? ""} placeholder=${prompt.placeholder ?? ""} @input=${(event: Event) => { if (event.target instanceof HTMLInputElement) this.onOAuthInput?.(event.target.value); }}>
+          <input type=${promptInputType} autocomplete=${promptInputType === "password" ? "off" : "on"} .value=${state.inputValue ?? ""} placeholder=${prompt.placeholder ?? ""} @input=${(event: Event) => { if (event.target instanceof HTMLInputElement) this.onOAuthInput?.(event.target.value); }}>
           <div class="actions"><button @click=${() => { this.onOAuthCancel?.(); }}>Cancel</button><button class="primary" ?disabled=${state.responding === true} @click=${() => { this.onOAuthRespond?.(); }}>Submit</button></div>
         ` : null}
         ${select !== undefined ? html`
           <p>${select.message}</p>
-          <div class="inline-options">${select.options.map((option) => html`<button @click=${() => { this.onOAuthRespond?.(option.value); }}>${option.label}</button>`)}</div>
+          <div class="inline-options">${select.options.map((option) => html`
+            <button @click=${() => { this.onOAuthRespond?.(option.value); }}>
+              <span>${option.label}</span>
+              ${option.description === undefined ? null : html`<small>${option.description}</small>`}
+            </button>
+          `)}</div>
         ` : null}
         ${state.error !== undefined && state.error !== "" ? html`<div class="error-text">${state.error}</div>` : null}
         ${flow.status === "error" || flow.status === "cancelled" ? html`<div class="error-text">${flow.error ?? flow.status}</div><div class="actions"><button @click=${() => { this.cancel(); }}>Close</button></div>` : null}
@@ -129,10 +131,7 @@ export class AuthDialog extends LitElement {
     }
     if (event.key !== "Enter") return;
     const state = this.state;
-    if (state?.step === "apiKey") {
-      event.preventDefault();
-      this.onSaveApiKey?.();
-    } else if (state?.step === "oauth" && state.flow.prompt !== undefined) {
+    if (state?.step === "oauth" && state.flow.prompt !== undefined) {
       event.preventDefault();
       this.onOAuthRespond?.();
     }
@@ -157,17 +156,23 @@ export class AuthDialog extends LitElement {
     .warning { color: var(--pi-warning); }
     .error-text { color: var(--pi-danger); }
     .progress { margin: 0; padding-left: 18px; color: var(--pi-muted); }
+    .info-links { display: flex; flex-wrap: wrap; gap: 8px 12px; }
     .inline-options { display: grid; gap: 8px; }
+    .inline-options button { display: grid; gap: 2px; text-align: left; }
+    .inline-options small { color: var(--pi-muted); }
     em { color: var(--pi-success); font-style: normal; font-size: 12px; }
   `];
 }
 
+export function oauthPromptInputType(promptType: NonNullable<OAuthFlowState["prompt"]>["promptType"]): "text" | "password" {
+  return promptType === "secret" ? "password" : "text";
+}
+
 function authTypeLabel(authType: "oauth" | "api_key"): string {
-  return authType === "oauth" ? "subscription" : "API key";
+  return authType === "oauth" ? "subscription" : "credentials";
 }
 
 function focusKey(state: AuthDialogState | undefined): string | undefined {
-  if (state?.step === "apiKey") return `api-key:${state.provider.authType}:${state.provider.id}`;
   if (state?.step === "oauth" && state.flow.prompt !== undefined) return `oauth:${state.flow.flowId}:${state.flow.prompt.requestId}`;
   return undefined;
 }

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import type { TerminalCommandRun, Workspace } from "../../shared/apiTypes.js";
+import type { TerminalCommandRun } from "../../shared/apiTypes.js";
+import type { WorkspaceListing } from "../types.js";
 import { workspaceDeletionMetadata } from "../../shared/workspaceDeletion.js";
 import { SessionDaemonClient } from "../../sessiond/sessionDaemonClient.js";
 import type { ProjectService } from "../projects/projectService.js";
@@ -42,11 +43,11 @@ async function deleteWorkspace(projects: ProjectService, workspaces: WorkspaceSe
   return parseTerminalCommandRun(deleteResponse.body);
 }
 
-function canDeleteWorkspace(workspace: Workspace): boolean {
+function canDeleteWorkspace(workspace: WorkspaceListing): boolean {
   return workspace.isGitWorktree && !workspace.isMain;
 }
 
-function workspaceLabel(workspace: Workspace): string {
+function workspaceLabel(workspace: WorkspaceListing): string {
   return workspace.branch ?? workspace.label;
 }
 

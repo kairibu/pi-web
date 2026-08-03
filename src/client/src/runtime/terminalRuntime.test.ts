@@ -10,6 +10,7 @@ const workspace: Workspace = {
   isMain: true,
   isGitRepo: true,
   isGitWorktree: true,
+  effectiveConfig: {},
 };
 
 const runningRun: TerminalCommandRun = {

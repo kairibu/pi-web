@@ -1,5 +1,106 @@
 # @jmfederico/pi-web
 
+## 1.202607.3
+
+### Patch Changes
+
+- 9191f59: Add an `ask_user` session tool that lets agents post structured question sets as one chat-native browser form. The form uses the transcript's single scroll area, keeps its header visible, and always gives every question a Custom free-text answer with mobile-safe text sizing. Agents end their run while the form waits; users can submit full or partial answers, unanswered questions are reported explicitly, sending an ordinary chat message voids the open form, pending forms survive browser and web/API reconnects, and closed forms remain readable in the transcript. Disable the tool from **Settings → Session daemon**, with `askUser: false`, or with `PI_WEB_ASK_USER=false`.
+- 111db63: Let chat markdown tables keep their natural width and scroll horizontally instead of being squeezed into the chat column, making them readable on mobile.
+- 5759201: Support Pi extension dialogs in the browser: `ctx.ui.confirm()`, `ctx.ui.select()`, and `ctx.ui.input()` now render as cards inline in the session transcript and resolve with the user's actual answer — including dialogs opened from `session_start` hooks while the session is still starting and from in-flight `tool_call` hooks, which previously resolved `false` immediately despite `hasUI === true`. Answers travel over a dedicated session-daemon channel rather than the prompt queue, so a dialog parked inside a `tool_call` hook cannot deadlock the run. Open dialogs survive browser reloads, the first answer wins across browser tabs, and unanswered dialogs settle safely on run abort, runtime replacement, or timeout. Adds the `extensionDialogsTimeoutMs` config key (default 5 minutes, `0` waits forever) as the unattended-dialog safety valve; dialog support is always on. Other `ExtensionUIContext` surfaces (widgets, status, editor, `custom`) remain unimplemented.
+- 8517800: Turn the bundled Info plugin panel into an always-available PI WEB status view: it now shows the running and installed versions, installation kind and path, release state, per-service health, and machine and workspace details from host-provided status, plus a "Copy PI WEB Diagnostics" action that copies a plain-text summary for bug reports.
+- 531ccf7: Let an already-known provider extension refresh its own model list after daemon startup. Previously every provider registration made after the global bootstrap was ignored, so a provider that fetched an updated model catalog on session start never had those models appear. A registration is now applied when it matches the provider's recorded startup configuration in every respect except the model list; anything else — a new provider, a changed provider base URL, API key, API type, headers, or auth surface, a native provider registration, or an unregistration — is still ignored to keep project-level provider configuration from leaking between workspaces. Documented the refreshed policy under Pi extension provider baseline in the configuration reference.
+- ce4b469: Add action-palette commands for selecting a session's model and thinking level, with support for assigning custom shortcuts in Settings.
+- 69b125b: Show cross-workspace session relationships in the session list. A session whose parent lives in another worktree now names that parent's workspace or branch instead of only reporting an unavailable parent, and offers a "Go to parent session" action that switches to the owning workspace and selects the parent. A session with children in other workspaces of the same project now shows how many, so a parent no longer looks childless when its children are not nested beneath it.
+- d19fca4: Add `files.listFiles(path)` to the stable plugin API so workspace panel and label plugins can list workspace directory entries on local and federated machines.
+- 8517800: Add `state.selectedMachine` to the stable plugin runtime state so plugin actions and other runtime callbacks can read the selected machine's identity, not just workspace panel contexts.
+- 87c0998: Add a built-in Relays plugin: a read-only workspace tab (and **Open Workspace Relays** action) that browses `.pi-web/relays/` packets, with a most-recent relay picker, ordered document tabs, sanitized markdown rendering, and truncation notices.
+- c3aeef2: Keep the relays panel document tab strip's horizontal scroll position when switching documents, instead of jumping back to the left edge on every tab click.
+- 5c3461d: Remove the legacy session archive migration from session daemon startup. Each `PI_WEB_DATA_DIR` data directory is independent: pointing PI WEB at a new data directory starts there with empty registries and no session archives.
+
+  You are only affected if you have session archives created before July 2026 in the default `~/.pi-web` data directory and you newly set a custom `PI_WEB_DATA_DIR`. To carry those archives over, stop PI WEB, then copy `archived-sessions.json` and the `archived-sessions/` directory from the old data directory into the new one.
+
+- 76f292c: Stop the session and workspace lists from re-scrolling to the selected row on live data refreshes, such as message-count updates while a session streams or workspace topology refreshes. The lists now scroll the selection into view only when the selection moves to a different row, an archived session is revealed, a restored session moves back to the current section, or a collapsed section expands.
+- 49e7c39: Say what a slow session start is waiting on. While a session is being created or opened, the activity line now names the current startup step — starting the Pi session, or loading session extensions — and adds a note when provider model lists happen to be refreshing at the same time. When nothing can be attributed, the previous generic wording is kept rather than guessing a cause.
+- 8af637b: Give every navigation row a single activity indicator that also carries unread state. When sessions beneath a workspace, project, or machine row have unread completions, the row's indicator becomes a static accent ring around the activity dot — or a filled accent dot while idle — instead of a separate dot next to the name. Session rows now surface unread state even while busy or sending, and the "N unread" header and mobile Sessions badge count busy unread sessions too.
+- 8af637b: Add "Mark as read" actions for unread sessions: a per-session item in the session row ⋯ menu (shown only for unread sessions) and a bulk "Mark read" button in the multi-select bar that marks every unread selected session as read.
+- 4a51503: Add copy buttons to the workspace menu details so the workspace path and branch can be copied to the clipboard with one click, matching the copy affordances already available in chats.
+- 8a24a7c: Pick up git worktrees created or removed outside PI WEB without any user action. The selected project's workspace list is re-read whenever the browser tab regains focus or becomes visible, on local and remote machines, keeping the current workspace, session, and scroll position untouched. Worktrees whose checkout directory no longer exists are hidden instead of being offered as selectable workspaces.
+
+## 1.202607.2
+
+### Patch Changes
+
+- b48b147: Allow npm 12 global installs and updates to run node-pty's required native-module installation scripts, and diagnose blocked native modules before installing services.
+- ed9c2f6: Fix multi-minute stalls when opening the model selector, starting sessions, or using the auth dialogs. Provider model catalogs are no longer fetched on request paths: the session daemon now refreshes them in the background on a bounded schedule — shortly after startup and hourly, plus immediately after a provider login or logout — with a per-run timeout and a single retry, keeping the stored catalogs when a provider fails. Setting `PI_WEB_OFFLINE` or `PI_OFFLINE` disables these background refreshes entirely. See the configuration reference for details.
+- 4ca4a1d: Add a hierarchical `/tree` navigator for switching conversation branches in place while retaining abandoned branches, with optional branch summaries. Compact branch indentation keeps the tree usable across mobile and desktop, and the preselected no-summary choice navigates immediately.
+- b85e1b9: Show project activity indicators for active sessions and terminals in external Git worktrees before the project is opened.
+- a77c83b: Clarify agent instructions so independent sessions are created only when explicitly requested and tracked subsessions remain part of the current task.
+- 115d74e: Keep session unread indicators and counts synchronized across browser clients and daemon restarts, and clear them when the completed chat is viewed. Tracked sub-sessions remain excluded from unread counts.
+- 8a5aaf9: Add a List/Tree toggle to the Git panel's changed-file list. Tree view groups changes by directory and opens fully collapsed, with a one-click expand-all/collapse-all control, and the chosen view is remembered across sessions.
+- dd435cb: Expand a changed submodule in the Git panel to see the work inside it. Tree view nests the submodule's own modified and untracked files (keeping their folder structure) and list view flattens them into one group, with a moved commit pointer shown as `<old> → <new>` when it changed. Selecting any inner file shows its real diff instead of the bare `Subproject commit` line.
+- 2429113: Build an immutable provider baseline at session-daemon startup. Globally installed Pi extensions can register both config-form and native providers during startup bootstrap; every later Pi extension registration or unregistration—including global replay, project same-ID replacement, lifecycle callbacks, and `/reload`—is ignored. PI WEB browser plugins are a separate browser-only system and are unaffected. Non-provider Pi extension features still work, and ignored calls are de-duplicated in session-daemon logs by operation/provider ID without logging provider configuration or credentials or creating session warnings/notifications.
+
+  After updating PI WEB, or after installing, removing, or updating a globally installed Pi extension that registers providers, manually restart `pi-web-sessiond.service` (`systemctl --user restart pi-web-sessiond`). Restarting only the web/API service and running `/reload` do not rebuild the provider baseline.
+
+- a884773: Keep PI WEB-managed sessions running when extensions use `ctx.ui.theme`, preserving formatted output as readable plain text.
+- 503c2c7: Show extension notifications in a compact, dismissible tray for the selected chat, with reconnect recovery and per-chat collapse state.
+- 2c777b4: Let users minimise session warnings with an accessible status-bar count that remains available as an expand/collapse toggle, an in-pane minimise chevron on the expanded warnings pane, per-session remembered state, and SVG warning icons.
+- 9285448: Require Pi Coding Agent `>=0.82.1 <0.83`. PI WEB no longer supports Pi 0.81 and earlier, so update Pi before updating PI WEB. On Pi 0.82 provider model catalogs revalidate with the server instead of downloading in full when nothing changed, and newly published catalog updates are no longer suppressed for a while after a fresh install.
+
+## 1.202607.1
+
+### Patch Changes
+
+- 73ac24c: Set `PI_WEB_TERMINAL=1` in PI WEB terminal shells.
+- 67f673b: Keep auth interactions bound to their originating machine and cancel flows created after their browser start operation becomes stale, preventing secrets from reaching the wrong remote or abandoned provider resources from surviving a closed dialog.
+- a1f749c: Add a capability-aware Clear queue action that removes queued session messages, including prompts held during compaction, without stopping active work.
+- dde48b3: Validate install and doctor service requirements in the real systemd or launchd manager context before changing native services, with plan-specific PATH guidance and safe probe cleanup. Thanks to @blain3white for the original report, reproduction, and root-cause analysis.
+- f539193: Restore session-daemon startup and authentication on supported Pi `>=0.80.8 <0.81` releases by migrating model and credential handling to `ModelRuntime`. Provider discovery now reloads model configuration and reports only complete usable credentials. Login options follow each provider's executable API-key and OAuth capabilities: multi-step API-key setup is supported, legacy one-secret clients fail safely before storing malformed credentials, and OAuth prompts retain their input, selection, and device-code semantics. A committed login remains successful through late cancellation or notification failures. Failed realtime delivery now closes only the affected socket so its browser can reconnect while healthy peers keep receiving events. PI WEB now requires Node.js `>=22.19.0`.
+- d72b14f: Add a **Check for PI WEB Updates** action that bypasses cached release data and refreshes update status for the selected local or federated machine.
+- 75e2377: Add selectable Pi-compatible agent profiles and companion CLIs for isolated auth, models, settings, sessions, Pi packages, plugins, diagnostics, and safe update commands. Settings shows when a session-daemon restart is required, and mixed-version remote saves fail instead of reporting false success. The embedded runtime remains the bundled Pi SDK.
+- ec0ca13: Store session archive metadata and archived session files under `PI_WEB_DATA_DIR` when configured, and automatically migrate a legacy archive on the first eligible session-daemon startup after upgrading.
+
+  Migration runs only when `PI_WEB_DATA_DIR` explicitly selects a different root, the legacy index and every referenced file form a complete valid archive, and the destination archive is pristine. PI WEB copies and verifies files across filesystem boundaries, rewrites their `archivePath` values, atomically commits the destination index, and only then removes legacy archive state. Ambiguous, invalid, partial, or coexisting layouts are left untouched instead of being merged or overwritten; active Pi session files are never moved.
+
+- 2b1507b: Load login shell profiles in new and continued interactive terminals so PATH-managed commands are available.
+- 15d25d8: Omit oversized tracked-subsession output from parent completion notices, directing the parent to retrieve the full result with `check_subsession` instead of duplicating a truncated preview in context.
+- a493949: Support root and nested reverse-proxy deployments with one published client, including scoped PWA assets, WebSockets, and local or federated plugins.
+- 21c58fe: Serve PI WEB plugin SVG assets with a browser-compatible content type and clarify module-relative asset packaging.
+- d72a001: Show notifications emitted by Pi extension slash commands in the web chat.
+- f181c47: Keep tool-result images visible in clearly labeled standard chat cards outside collapsed event groups while retaining technical execution details and final message metadata.
+- 2b17145: Stream in-flight assistant replies immediately when opening or reconnecting to a session mid-turn. The chat now seeds the partial message (text, thinking, and in-progress tool calls) and continues streaming live updates on top of it, replacing the blocking "Catching up…" placeholder and the end-of-turn transcript reload. Sessions still open normally against remote machines or session daemons that predate this feature: the snapshot is fetched as a progressive enhancement and its absence no longer blocks the transcript.
+- aedcbf8: Surface live session startup warnings in the web UI. A pinned banner at the top of the session view now shows resource and runtime diagnostics (skills, prompts, themes, and extension load errors) plus the Anthropic subscription-auth billing notice, recomputed from the current runtime so they stay accurate across browser reloads. The Anthropic billing notice can be dismissed, which durably suppresses it through the underlying agent's own warning setting.
+- d5154df: Add explicit tracked-subsession yielding with no-poll wake-up guidance, remaining-child status, and clear boundaries around child output.
+- 6cd666f: Let chat images open in a full-size modal viewer on click or keyboard activation, with backdrop and Escape to dismiss, a touch-friendly close button, and safe-area handling so the viewer clears device notches.
+
+## 1.202607.0
+
+### Patch Changes
+
+- d165d69: Make archive and delete actions reliable for large multi-session selections.
+- d6cfffd: Allow chat copy buttons to work from HTTP private-network addresses by falling back when the browser Clipboard API is unavailable.
+- a660ba8: Keep delegation tools available in human-created and independently spawned sessions, remove them from tracked child sessions, and guide parents to wait for required children at join points without polling.
+- 256db33: Keep npm release builds working across platforms and exclude internal test-support modules from published packages.
+- 338faf4: Speed up chat loading, session resume, and long-conversation rendering while reducing browser response sizes.
+- ad62853: Show complete file paths and commands in tool headers and expanded details, with horizontal scrolling for long tool targets and results.
+- a874798: Make spawned and tracked subsessions inherit the dispatching session's current model instead of falling back to the last globally selected model.
+- eb17276: Preserve archive and archived-session delete actions for older federated PI WEB machines that do not yet advertise session persistence or delete capabilities.
+- 8ade238: Manage Pi packages from Settings on the selected local or federated PI WEB machine, with install, update, and removal flows that respect each machine's advertised capabilities.
+- 2009e6a: Keep the chat prompt stable during streaming so mobile touch gestures, including iOS paste and edit callouts, are not interrupted.
+- 7063c2c: Prevent iOS Safari from zooming into small text inputs across the web UI.
+- 386c67e: Require Pi 0.80 or newer and use its stable streaming API for session-name generation.
+- 32907bb: Support Pi's `max` thinking level and refresh shipped runtime dependencies.
+- 10efb7f: Name Relay handoff sessions consistently from their relay name and leg number.
+- 256db33: Improve file suggestions by waiting for all Git probes before deciding whether to scan the wider workspace.
+- 0b17b9d: Promote the Updates tab to stable by removing its beta label while keeping update message counts visible.
+- 64b2b32: Edit machine-scoped PI WEB settings on the selected machine—including session daemon tools, plugin enablement, path access, and upload defaults—while keeping gateway/browser-only settings local and disabling unsupported remote forms.
+- d2e10cd: Show generated suffixes for unnamed sessions so multiple new empty chats are easier to distinguish.
+- 889672f: Add `/reload` for PI WEB sessions so newly installed Pi package resources can be loaded without restarting the session daemon, with separate guidance for browser plugin reloads.
+- 2665d1e: Open new chats immediately—including on mobile—queue sends until their backend sessions are ready, and keep concurrent starts and archive/delete/reload actions aligned with server persistence.
+- b61a9c0: Standardize Settings panels so descriptions, notices, and controls render in a consistent order.
+- abcf44b: Show complete message dates and model identifiers in a consistent label, wrapping expanded metadata without changing message-header height.
+- 02f34c4: Add a terminal copy mode with a touch-selectable, color-preserving output snapshot and a Copy all action for mobile browsers.
+
 ## 1.202606.7
 
 ### Patch Changes

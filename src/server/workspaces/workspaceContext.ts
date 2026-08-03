@@ -1,10 +1,10 @@
 import type { ProjectService } from "../projects/projectService.js";
-import type { Project, Workspace } from "../types.js";
+import type { Project, WorkspaceListing } from "../types.js";
 import type { WorkspaceService } from "./workspaceService.js";
 
 export interface WorkspaceContext {
   project: Project;
-  workspace: Workspace;
+  workspace: WorkspaceListing;
   root: string;
 }
 

@@ -1,5 +1,5 @@
 import type { TemplateResult } from "lit";
-import type { FileContentResponse, MachineKind, PiWebStatusResponse, TerminalCommandRunHandle, WriteWorkspaceFileOptions, WriteWorkspaceFileResponse, DeleteWorkspaceFileResponse, MoveWorkspaceFileOptions, MoveWorkspaceFileResponse } from "./shared/apiTypes.js";
+import type { FileContentResponse, FileTreeResponse, MachineKind, PiWebStatusResponse, TerminalCommandRunHandle, WriteWorkspaceFileOptions, WriteWorkspaceFileResponse, DeleteWorkspaceFileResponse, MoveWorkspaceFileOptions, MoveWorkspaceFileResponse } from "./shared/apiTypes.js";
 
 export type {
   FileContentMediaType,
@@ -66,6 +66,8 @@ export interface PluginMachine {
 }
 
 export interface PluginRuntimeState {
+  /** Identity of the currently selected machine. Undefined only on older hosts or before machines load. */
+  selectedMachine?: PluginMachine;
   selectedWorkspace?: Workspace;
   selectedSession?: unknown;
   workspaceTool?: string;
@@ -99,6 +101,8 @@ export interface PluginRuntimeContext {
   refreshFiles: () => void | Promise<void>;
   refreshGit: () => void | Promise<void>;
   refreshAppData: () => void | Promise<void>;
+  /** Force a fresh PI WEB release check on the selected machine. Optional for compatibility with older hosts. */
+  checkForPiWebUpdates?: () => void | Promise<void>;
   reloadPage: () => void;
   startSession: () => void | Promise<void>;
   archiveSession: () => void | Promise<void>;
@@ -131,6 +135,10 @@ export interface Workspace {
 export interface WorkspaceFiles {
   /** Read a file from the workspace. Works for local and federated machines. */
   readFile(path: string): Promise<FileContentResponse>;
+  /** List the entries of a workspace directory. Pass "" for the workspace root.
+   *  Works for local and federated machines. Rejects when the directory does not
+   *  exist or cannot be read, matching readFile error behavior. */
+  listFiles(path: string): Promise<FileTreeResponse>;
   /** Write content to a workspace file. Creates intermediate directories by default.
    *  Works for local and federated machines. Auto-refreshes the file explorer after success. */
   writeFile(path: string, content: string | Uint8Array, options?: WriteWorkspaceFileOptions): Promise<WriteWorkspaceFileResponse>;

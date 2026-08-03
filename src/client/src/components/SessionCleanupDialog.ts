@@ -5,8 +5,6 @@ import { canRunSessionCleanup, confirmSessionCleanup, DEFAULT_SESSION_CLEANUP_DR
 
 @customElement("session-cleanup-dialog")
 export class SessionCleanupDialog extends LitElement {
-  @property({ type: Boolean }) canCleanup = true;
-  @property({ type: String }) unavailableMessage = "Update and restart Pi-Web on this machine to clean up sessions.";
   @property({ attribute: false }) preview?: SessionCleanupPreviewResponse;
   @property({ attribute: false }) previewRequest?: SessionCleanupRequest;
   @property({ attribute: false }) result?: SessionCleanupExecuteResponse;
@@ -28,7 +26,7 @@ export class SessionCleanupDialog extends LitElement {
   override render(): TemplateResult {
     const validation = validateSessionCleanupDraft(this.draft);
     const selectedPreview = this.selectedPreview();
-    const runEnabled = canRunSessionCleanup({ canCleanup: this.canCleanup, draft: this.draft, preview: selectedPreview, previewRequest: this.previewRequest, loading: this.loading, running: this.running });
+    const runEnabled = canRunSessionCleanup({ draft: this.draft, preview: selectedPreview, previewRequest: this.previewRequest, loading: this.loading, running: this.running });
     const runTitle = runEnabled ? "Run cleanup" : selectedPreview !== undefined && !sessionCleanupPreviewHasTargets(selectedPreview) ? "Select at least one project to run cleanup" : "Preview cleanup before running it";
     return html`
       <div class="backdrop" @mousedown=${() => { this.onClose?.(); }}>
@@ -42,14 +40,14 @@ export class SessionCleanupDialog extends LitElement {
           </header>
           <div class="body">
             <p class="intro">Preview manual cleanup for this machine before archiving idle sessions or permanently deleting old archived sessions.</p>
-            ${this.canCleanup ? this.renderForm(validation.ok ? "" : validation.error) : this.renderUnavailable()}
+            ${this.renderForm(validation.ok ? "" : validation.error)}
             ${this.renderMessage()}
             ${this.preview === undefined ? null : this.renderPreview(this.preview)}
             ${this.result === undefined ? null : this.renderResult(this.result)}
           </div>
           <footer>
             <button @click=${() => { this.onClose?.(); }}>${this.result === undefined ? "Cancel" : "Close"}</button>
-            <button ?disabled=${!this.canCleanup || this.loading || this.running} @click=${() => { this.previewCleanup(); }}>${this.loading ? "Previewing…" : "Preview"}</button>
+            <button ?disabled=${this.loading || this.running} @click=${() => { this.previewCleanup(); }}>${this.loading ? "Previewing…" : "Preview"}</button>
             <button class="danger" ?disabled=${!runEnabled} title=${runTitle} @click=${() => { this.runCleanup(); }}>${this.running ? "Running…" : "Run cleanup"}</button>
           </footer>
         </section>
@@ -80,10 +78,6 @@ export class SessionCleanupDialog extends LitElement {
       ${validationError === "" ? null : html`<div class="dialog-error" role="alert">${validationError}</div>`}
       ${previewOutOfDate ? html`<div class="hint" role="status">Thresholds changed. Preview again before running cleanup.</div>` : null}
     `;
-  }
-
-  private renderUnavailable(): TemplateResult {
-    return html`<div class="unavailable" role="status">${this.unavailableMessage}</div>`;
   }
 
   private renderMessage(): TemplateResult | null {
@@ -202,7 +196,7 @@ export class SessionCleanupDialog extends LitElement {
     }
     const selectedPreview = this.selectedPreview();
     const selectedProjectCwds = this.selectedProjectCwdsForPreview();
-    if (!canRunSessionCleanup({ canCleanup: this.canCleanup, draft: this.draft, preview: selectedPreview, previewRequest: this.previewRequest })) {
+    if (!canRunSessionCleanup({ draft: this.draft, preview: selectedPreview, previewRequest: this.previewRequest })) {
       this.formError = selectedPreview !== undefined && !sessionCleanupPreviewHasTargets(selectedPreview) ? "Select at least one project to run cleanup." : "Preview cleanup before running it.";
       return;
     }
@@ -235,9 +229,8 @@ export class SessionCleanupDialog extends LitElement {
     input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pi-accent); }
     input.days { box-sizing: border-box; width: 88px; min-width: 0; border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-bg); color: var(--pi-text); padding: 8px 9px; font: var(--pi-control-font-size, 16px) var(--pi-control-font-family, system-ui, sans-serif); }
     input.days:disabled { opacity: .55; }
-    .warning, .unavailable, .dialog-error, .result { border: 1px solid var(--pi-border); border-radius: 10px; padding: 10px 12px; }
+    .warning, .dialog-error, .result { border: 1px solid var(--pi-border); border-radius: 10px; padding: 10px 12px; }
     .warning { border-color: var(--pi-warning-border); background: var(--pi-warning-surface); color: var(--pi-text); }
-    .unavailable { border-color: var(--pi-warning-border); background: var(--pi-warning-surface); color: var(--pi-warning); }
     .dialog-error { border-color: var(--pi-danger); background: color-mix(in srgb, var(--pi-danger) 10%, var(--pi-bg)); color: var(--pi-danger); }
     .result { border-color: var(--pi-success-border); background: var(--pi-success-bg); }
     .preview { display: grid; gap: 10px; min-width: 0; }

@@ -38,7 +38,7 @@
         "downloadUrl": "https://www.npmjs.com/package/@jmfederico/pi-web",
         "codeRepository": "https://github.com/jmfederico/pi-web",
         "description": "PI WEB is a web UI for Pi Coding Agent that keeps persistent agent sessions running in real workspaces on your machine or server.",
-        "softwareRequirements": "Node.js 22 or newer and Pi Coding Agent",
+        "softwareRequirements": "Node.js 22.19.0 or newer and Pi Coding Agent >=0.82.1 <0.83",
         "license": "https://github.com/jmfederico/pi-web/blob/main/LICENSE"
       }
     </script>
@@ -138,8 +138,8 @@
 # laptop, phone, tablet — same live sessions
 
 <span class="prompt">$</span> pi-web doctor
-✓ login shell can find node >= 22
-✓ native service shell can find pi
+✓ caller login shell can find node >= 22.19.0
+✓ native-service plan requirements pass in manager context
 ✓ ready for persistent agent work</code></pre>
           </aside>
         </div>
@@ -337,7 +337,7 @@
               <strong>User service install</strong>
               <button class="copy-button" data-copy="#home-install">Copy</button>
             </div>
-            <pre id="home-install"><code><span class="prompt">$</span> npm install -g @jmfederico/pi-web
+            <pre id="home-install"><code><span class="prompt">$</span> npm install -g @jmfederico/pi-web --allow-scripts=node-pty
 <span class="prompt">$</span> pi-web install
 <span class="prompt">$</span> pi-web doctor
 <span class="prompt">$</span> pi-web version

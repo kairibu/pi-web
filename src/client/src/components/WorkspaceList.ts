@@ -1,6 +1,7 @@
 import { LitElement, html, type PropertyValues, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { Workspace, WorkspaceActivity } from "../api";
+import { writeClipboardText } from "../clipboard";
 import type { WorkspaceLabelItem } from "../plugins/types";
 import { workspaceActivityFor, workspaceActivityIndicator } from "../workspaceActivity";
 import { actionMenuPanelStyle } from "./actionMenu";
@@ -19,6 +20,7 @@ export class WorkspaceList extends LitElement implements KeyboardNavigableSectio
   @property({ attribute: false }) workspaceLabelItems: (workspace: Workspace) => WorkspaceLabelItem[] = () => [];
   @property({ attribute: false }) activities: Record<string, WorkspaceActivity> = {};
   @property({ attribute: false }) deletingWorkspaceIds: string[] = [];
+  @property({ attribute: false }) unreadWorkspaceIds: ReadonlySet<string> = new Set();
   @property({ attribute: false }) onSelect?: (workspace: Workspace) => void;
   @property({ attribute: false }) onDelete?: (workspace: Workspace) => void;
   @property({ attribute: false }) onToggleCollapsed?: () => void;
@@ -27,6 +29,7 @@ export class WorkspaceList extends LitElement implements KeyboardNavigableSectio
   @property({ attribute: false }) onCancelKeyboardNavigation?: () => void | Promise<void>;
   @state() private openMenuWorkspaceId: string | undefined;
   @state() private menuStyle = "";
+  @state() private copiedDetailKey: string | undefined;
 
   private readonly onDocumentClick = (event: MouseEvent) => {
     if (event.composedPath().includes(this)) return;
@@ -46,7 +49,19 @@ export class WorkspaceList extends LitElement implements KeyboardNavigableSectio
   protected override updated(changed: PropertyValues<this>): void {
     if (changed.has("workspaces") && this.openMenuWorkspaceId !== undefined && !this.workspaces.some((workspace) => workspace.id === this.openMenuWorkspaceId)) this.openMenuWorkspaceId = undefined;
     if (changed.has("collapsed") && this.collapsed) this.openMenuWorkspaceId = undefined;
-    if ((changed.has("selected") || changed.has("workspaces") || changed.has("collapsed")) && !this.collapsed) this.scrollSelectedIntoView();
+    if (this.shouldRevealSelectedRow(changed)) this.scrollSelectedIntoView();
+  }
+
+  /**
+   * Positive reveal triggers only: topology refreshes replace `workspaces`
+   * with a new array for the same selection and must never re-scroll. Reveal
+   * the selected row only when the selection moves to a different row (first
+   * render with a selection included) or when the section expands.
+   */
+  private shouldRevealSelectedRow(changed: PropertyValues<this>): boolean {
+    if (this.collapsed) return false;
+    if (changed.has("collapsed")) return true;
+    return changed.has("selected") && changed.get("selected")?.id !== this.selected?.id;
   }
 
   async focusSelectedOrFirst(): Promise<boolean> {
@@ -85,7 +100,7 @@ export class WorkspaceList extends LitElement implements KeyboardNavigableSectio
   }
 
   private renderHeading() {
-    if (!this.collapsible) return "Workspaces";
+    if (!this.collapsible) return html`<span>Workspaces</span>`;
     const selectedSummary = this.selected === undefined ? "No workspace selected" : `${this.selected.label}${this.selected.isMain ? " · main" : ""} · ${this.selected.path}`;
     const selectedTitle = this.selected?.path ?? selectedSummary;
     return html`<button class="section-toggle" aria-expanded=${String(!this.collapsed)} @click=${() => { this.onToggleCollapsed?.(); }}><span class="section-title"><span class="section-name">${this.collapsed ? "▸" : "▾"} Workspaces</span>${this.collapsed ? html`<small class="section-selected" title=${selectedTitle}>${selectedSummary}</small>` : null}</span><small class="section-count">${this.workspaces.length}</small></button>`;
@@ -93,7 +108,8 @@ export class WorkspaceList extends LitElement implements KeyboardNavigableSectio
 
   private renderActivity(workspace: Workspace): TemplateResult | undefined {
     const kind = workspaceActivityIndicator(workspaceActivityFor(workspace, this.activities));
-    return renderActionActivityIndicator(kind, kind === "terminal" ? "Workspace terminal active" : "Workspace active");
+    const unreadLabel = this.unreadWorkspaceIds.has(workspace.id) ? "Unread sessions in this workspace" : undefined;
+    return renderActionActivityIndicator(kind, kind === "terminal" ? "Workspace terminal active" : "Workspace active", unreadLabel);
   }
 
   private renderWorkspaceMain(label: string, items: WorkspaceLabelItem[], workspace: Workspace): TemplateResult {
@@ -145,15 +161,16 @@ export class WorkspaceList extends LitElement implements KeyboardNavigableSectio
   }
 
   private renderWorkspaceDetails(label: string, items: WorkspaceLabelItem[], workspace: Workspace): TemplateResult {
+    const branchCopyAction = workspace.branch === undefined ? "Copy workspace label" : "Copy branch";
     return html`
       <dl class="workspace-menu-details">
         <div class="workspace-detail-row">
           <dt>${workspace.branch === undefined ? "Workspace" : "Branch"}</dt>
-          <dd>${label}</dd>
+          <dd>${label}${this.renderDetailCopyButton(`${workspace.id}:branch`, workspace.branch ?? workspace.label, branchCopyAction)}</dd>
         </div>
         <div class="workspace-detail-row">
           <dt>Path</dt>
-          <dd title=${workspace.path}>${workspace.path}</dd>
+          <dd title=${workspace.path}>${workspace.path}${this.renderDetailCopyButton(`${workspace.id}:path`, workspace.path, "Copy path")}</dd>
         </div>
         ${items.length === 0 ? null : html`
           <div class="workspace-detail-row">
@@ -163,6 +180,25 @@ export class WorkspaceList extends LitElement implements KeyboardNavigableSectio
         `}
       </dl>
     `;
+  }
+
+  private renderDetailCopyButton(key: string, value: string, action: string): TemplateResult {
+    const copied = this.copiedDetailKey === key;
+    const label = copied ? "Copied" : action;
+    return html`
+      <button type="button" class="detail-copy" title=${label} aria-label=${label} @click=${() => { void this.copyDetail(key, value); }}>
+        <span aria-hidden="true">${copied ? "✓" : "⧉"}</span>
+      </button>
+    `;
+  }
+
+  private async copyDetail(key: string, value: string): Promise<void> {
+    const copied = await writeClipboardText(value);
+    if (!copied) return;
+    this.copiedDetailKey = key;
+    window.setTimeout(() => {
+      if (this.copiedDetailKey === key) this.copiedDetailKey = undefined;
+    }, 1200);
   }
 
   private delete(workspace: Workspace): void {

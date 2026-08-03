@@ -10,6 +10,7 @@ const workspace: Workspace = {
   isMain: false,
   isGitRepo: true,
   isGitWorktree: true,
+  effectiveConfig: {},
 };
 
 function run(id: string, workspaceId: string, createdAt: string, status: TerminalCommandRun["status"]): TerminalCommandRun {

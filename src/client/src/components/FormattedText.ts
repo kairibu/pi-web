@@ -1,6 +1,7 @@
 import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { writeClipboardText } from "../clipboard";
 import { toSafeMarkdownHtml } from "../formatting/markdown";
 import { formattedTextStyles } from "./shared";
 
@@ -49,8 +50,8 @@ export class FormattedText extends LitElement {
   };
 
   private async copyCode(text: string, button: HTMLButtonElement): Promise<void> {
-    const ok = await writeClipboard(text);
-    this.setCopyButtonState(button, ok ? "copied" : "failed");
+    const copied = await writeClipboardText(text);
+    this.setCopyButtonState(button, copied ? "copied" : "failed");
     window.setTimeout(() => {
       this.setCopyButtonState(button, "idle");
     }, 1200);
@@ -65,13 +66,4 @@ export class FormattedText extends LitElement {
   }
 
   static override styles = formattedTextStyles;
-}
-
-async function writeClipboard(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
 }

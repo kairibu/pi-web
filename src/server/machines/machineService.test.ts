@@ -3,7 +3,6 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PiWebRuntimeResponse } from "../../shared/apiTypes.js";
-import { PI_WEB_CAPABILITIES } from "../../shared/capabilities.js";
 import type { MachineClient } from "./machineClient.js";
 import { MachineService } from "./machineService.js";
 import { MachineStore, machineStorePath } from "./machineStore.js";
@@ -40,6 +39,56 @@ describe("MachineService", () => {
     const raw: unknown = JSON.parse(await readFile(storePath, "utf8"));
     expect(raw).toMatchObject({ machines: [expect.objectContaining({ kind: "remote", token: "secret" })] });
     await expectOwnerOnlyMachineStore(storePath);
+  });
+
+  it("gets, updates, and removes remote machines without exposing stored secrets", async () => {
+    const machine = await service.add({
+      name: "Remote",
+      baseUrl: "https://remote.example.test",
+      token: "initial-secret",
+      headers: { "X-Pi-Web-Test": "initial" },
+    });
+
+    expect(await service.get(machine.id)).toEqual(machine);
+
+    const updated = await service.update(machine.id, {
+      name: " Updated Remote ",
+      baseUrl: "https://updated.example.test/",
+      token: "updated-secret",
+      headers: { "X-Pi-Web-Test": "updated" },
+    });
+    if (updated === undefined) throw new Error("Expected remote machine update to succeed");
+
+    expect(updated).toMatchObject({
+      id: machine.id,
+      name: "Updated Remote",
+      kind: "remote",
+      baseUrl: "https://updated.example.test",
+      createdAt: machine.createdAt,
+    });
+    expect(updated).not.toHaveProperty("token");
+    expect(updated).not.toHaveProperty("headers");
+    expect(await service.get(machine.id)).toEqual(updated);
+    expect(await service.list()).toEqual([expect.objectContaining({ id: "local", kind: "local" }), updated]);
+
+    const persistedAfterUpdate: unknown = JSON.parse(await readFile(storePath, "utf8"));
+    expect(persistedAfterUpdate).toMatchObject({
+      machines: [expect.objectContaining({
+        id: machine.id,
+        name: "Updated Remote",
+        baseUrl: "https://updated.example.test",
+        token: "updated-secret",
+        headers: { "X-Pi-Web-Test": "updated" },
+      })],
+    });
+
+    await expect(service.remove(machine.id)).resolves.toBe(true);
+    await expect(service.get(machine.id)).resolves.toBeUndefined();
+    await expect(service.remove(machine.id)).resolves.toBe(false);
+    expect(await service.list()).toEqual([expect.objectContaining({ id: "local", kind: "local" })]);
+
+    const persistedAfterRemove: unknown = JSON.parse(await readFile(storePath, "utf8"));
+    expect(persistedAfterRemove).toEqual({ machines: [] });
   });
 
   it.skipIf(process.platform === "win32")("tightens permissions after reading an existing machine store", async () => {
@@ -121,6 +170,7 @@ describe("MachineService", () => {
 
     const first = await remoteService.runtime(machine.id);
     const second = await remoteService.runtime(machine.id);
+    const forced = await remoteService.runtime(machine.id, true);
 
     expect(first).toEqual({
       machineId: machine.id,
@@ -132,7 +182,8 @@ describe("MachineService", () => {
       capabilities: body.capabilities,
     });
     expect(second).toEqual(first);
-    expect(requestJson).toHaveBeenCalledTimes(1);
+    expect(forced).toEqual(first);
+    expect(requestJson).toHaveBeenCalledTimes(2);
     expect(requestJson).toHaveBeenCalledWith("GET", "/api/pi-web/runtime", undefined, { timeoutMs: 3000 });
     expect(factoryMachines).toEqual([
       expect.objectContaining({
@@ -142,6 +193,7 @@ describe("MachineService", () => {
         token: "secret",
         headers: { "X-Pi-Web-Test": "yes" },
       }),
+      expect.objectContaining({ id: machine.id }),
     ]);
   });
 
@@ -210,17 +262,17 @@ function remoteRuntimeBody(): PiWebRuntimeResponse {
         label: "Remote Web",
         runtimeVersion: "1.0.0",
         available: true,
-        capabilities: [PI_WEB_CAPABILITIES.sessionsDeleteArchived, PI_WEB_CAPABILITIES.piPackagesManage],
+        capabilities: [],
       },
       sessiond: {
         component: "sessiond",
         label: "Remote Session daemon",
         runtimeVersion: "1.0.0",
         available: true,
-        capabilities: [PI_WEB_CAPABILITIES.sessionsDeleteArchived],
+        capabilities: [],
       },
     },
-    capabilities: [PI_WEB_CAPABILITIES.sessionsDeleteArchived, PI_WEB_CAPABILITIES.piPackagesManage],
+    capabilities: [],
   };
 }
 

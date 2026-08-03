@@ -1,5 +1,6 @@
-import type { ArchiveSessionsResponse, AuthProviderOption, AuthProviderStatus, AuthProvidersResponse, AuthStatusSource, AuthType, CommandOption, CommandResult, DeleteWorkspaceFileResponse, FileContentResponse, FileSuggestion, FileTreeEntry, FileTreeResponse, GitDiffResponse, GitFileState, GitStatusFile, GitStatusResponse, Machine, MachineHealth, MachineKind, MachineRuntime, MachineStatus, MessagePage, ModelSelectionResponse, MoveWorkspaceFileResponse, OAuthFlowState, PiWebCapability, PiWebComponentStatus, PiWebConfigEnvOverrides, PiWebConfigResponse, PiWebConfigValues, PiWebInstallationInfo, PiWebPluginConfigMap, PiWebPluginInfo, PiWebPluginsResponse, PiWebPluginScope, PiWebReleaseStatus, PiWebRuntimeComponent, PiWebRuntimeResponse, PiWebServiceComponent, PiWebShortcutConfig, PiWebStatusMessage, PiWebStatusResponse, PiWebStatusSeverity, Project, QueuedSessionMessage, SavedPromptAttachment, SessionBulkArchiveResponse, SessionBulkDeleteArchivedResponse, SessionBulkFailure, SessionCleanupExecuteResponse, SessionCleanupPreviewResponse, SessionCleanupProjectSummary, SessionCleanupThresholds, SessionCleanupTotals, SessionInfo, SessionModel, SessionStatus, SlashCommand, TerminalCommandRun, TerminalCommandRunStatus, TerminalInfo, ThinkingLevelsResponse, WriteWorkspaceFileResponse, Workspace, WorkspaceActivity, WorkspaceActivityResponse } from "../../../shared/apiTypes";
-import type { PiPackageInfo, PiPackageMutationAction, PiPackageMutationResponse, PiPackageScope, PiPackagesResponse } from "../../../shared/apiTypes";
+import { ASK_USER_ID_MAX_LENGTH, ASK_USER_OPTION_LIMIT, ASK_USER_OTHER_TEXT_MAX_LENGTH, ASK_USER_QUESTION_LIMIT, ASK_USER_TEXT_MAX_LENGTH, EXTENSION_DIALOG_ID_MAX_LENGTH, EXTENSION_DIALOG_INPUT_MAX_LENGTH, EXTENSION_DIALOG_OPTION_LIMIT, EXTENSION_DIALOG_TEXT_MAX_LENGTH, SESSION_NOTIFICATION_LIMIT, SESSION_NOTIFICATION_MESSAGE_BYTES, SESSION_UNREAD_CATALOG_ID_MAX_LENGTH, SESSION_UNREAD_COMPLETED_AT_MAX_LENGTH, SESSION_UNREAD_CWD_MAX_LENGTH, SESSION_UNREAD_LIMIT, SESSION_UNREAD_SESSION_ID_MAX_LENGTH, type ArchiveSessionsResponse, type AskUserCloseReason, type AskUserCloseResponse, type AskUserOutcome, type AskUserQuestion, type AskUserQuestionOption, type AskUserQuestionRecord, type PendingAskUser, type PendingExtensionDialog, type AuthProviderOption, type AuthProviderStatus, type AuthProvidersResponse, type AuthStatusSource, type AuthType, type CommandOption, type CommandResult, type DeleteWorkspaceFileResponse, type ExtensionDialogAnswer, type ExtensionDialogCloseReason, type ExtensionDialogCloseResponse, type ExtensionDialogKind, type ExtensionDialogOutcome, type FileContentResponse, type FileSuggestion, type FileTreeEntry, type FileTreeResponse, type GitDiffResponse, type GitFileState, type GitStatusFile, type GitStatusResponse, type GlobalSessionEvent, type Machine, type MachineHealth, type MachineKind, type MachineRuntime, type MachineStatus, type MessagePage, type ModelSelectionResponse, type MoveWorkspaceFileResponse, type OAuthFlowState, type PiWebAgentDirEnvSource, type PiWebCapability, type PiWebComponentStatus, type PiWebConfigEnvOverrides, type PiWebConfigResponse, type PiWebConfigValues, type PiWebInstallationInfo, type PiWebPluginConfigMap, type PiWebPluginInfo, type PiWebPluginsResponse, type PiWebPluginScope, type PiWebReleaseStatus, type PiWebRuntimeComponent, type PiWebRuntimeResponse, type PiWebServiceComponent, type PiWebShortcutConfig, type PiWebStatusMessage, type PiWebStatusResponse, type PiWebStatusSeverity, type Project, type QueuedSessionMessage, type SavedPromptAttachment, type SessionBulkArchiveResponse, type SessionBulkDeleteArchivedResponse, type SessionBulkFailure, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupProjectSummary, type SessionCleanupThresholds, type SessionCleanupTotals, type SessionInfo, type SessionModel, type SessionNotification, type SessionNotificationClearReason, type SessionNotificationDismissThrough, type SessionNotificationInboxDelta, type SessionNotificationInboxEvent, type SessionNotificationInboxSnapshot, type SessionNotificationSeverity, type SessionNotificationSummary, type SessionStatus, type SessionStreamSnapshot, type SessionUiEvent, type SessionUnreadCatalogSnapshot, type SessionUnreadEvent, type SessionUnreadSummary, type SessionWarning, type SessionWarningSeverity, type SlashCommand, type TerminalCommandRun, type TerminalCommandRunStatus, type TerminalInfo, type TerminalUiEvent, type ThinkingLevelsResponse, type WriteWorkspaceFileResponse, type Workspace, type WorkspaceEffectiveConfig, type WorkspaceActivity, type WorkspaceActivityUiEvent, type WorkspaceActivityResponse } from "../../../shared/apiTypes";
+import type { PiPackageInfo, PiPackageMutationAction, PiPackageMutationResponse, PiPackageScope, PiPackagesResponse, SessionActivity, SessionStartupProgressEvent, SessionTreeNavigateResult, SessionTreeNode, SessionTreeNodeKind, SessionTreeSnapshot } from "../../../shared/apiTypes";
+import { parseActiveAgentProfileDescriptor } from "../../../shared/activeAgentProfile";
 import { parseKnownPiWebCapabilities } from "../../../shared/capabilities";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -54,7 +55,6 @@ function arrayOfString(value: unknown, key: string): string[] {
 }
 
 export function parseMessagePage(value: unknown): MessagePage {
-  if (Array.isArray(value)) return { messages: value, start: 0, total: value.length };
   const record = requireRecord(value);
   return { messages: parseUnknownArray(record["messages"]), start: requireNumber(record, "start"), total: requireNumber(record, "total") };
 }
@@ -142,13 +142,12 @@ export function parseWorkspace(value: unknown): Workspace {
     isMain: requireBoolean(record, "isMain"),
     isGitRepo: requireBoolean(record, "isGitRepo"),
     isGitWorktree: requireBoolean(record, "isGitWorktree"),
-    ...optionalField("effectiveConfig", optionalWorkspaceEffectiveConfig(record["effectiveConfig"])),
+    effectiveConfig: requireWorkspaceEffectiveConfig(record["effectiveConfig"]),
   };
 }
 
-function optionalWorkspaceEffectiveConfig(value: unknown): Workspace["effectiveConfig"] | undefined {
-  if (value === undefined) return undefined;
-  if (!isRecord(value) || Array.isArray(value)) throw new Error("Invalid workspace effectiveConfig field");
+function requireWorkspaceEffectiveConfig(value: unknown): WorkspaceEffectiveConfig {
+  if (!isRecord(value) || Array.isArray(value)) throw new Error("Expected workspace effectiveConfig field");
   return {
     ...optionalField("uploads", optionalUploads(value["uploads"])),
   };
@@ -159,6 +158,9 @@ export function parseSessionInfo(value: unknown): SessionInfo {
   const name = optionalString(record, "name");
   const persisted = parseOptionalBoolean(record["persisted"], "persisted");
   const parentSessionPath = optionalString(record, "parentSessionPath");
+  const parentSessionCwd = optionalString(record, "parentSessionCwd");
+  const parentSessionId = optionalString(record, "parentSessionId");
+  const childSessionsElsewhere = parseOptionalCount(record["childSessionsElsewhere"], "childSessionsElsewhere");
   const archivedAt = optionalString(record, "archivedAt");
   return {
     id: requireString(record, "id"),
@@ -171,9 +173,277 @@ export function parseSessionInfo(value: unknown): SessionInfo {
     messageCount: requireNumber(record, "messageCount"),
     firstMessage: requireString(record, "firstMessage"),
     ...(parentSessionPath === undefined ? {} : { parentSessionPath }),
+    ...(parentSessionCwd === undefined ? {} : { parentSessionCwd }),
+    ...(parentSessionId === undefined ? {} : { parentSessionId }),
+    ...(childSessionsElsewhere === undefined ? {} : { childSessionsElsewhere }),
     ...(record["archived"] === true ? { archived: true } : {}),
     ...(archivedAt === undefined ? {} : { archivedAt }),
   };
+}
+
+function parseSessionWarningSeverity(value: unknown): SessionWarningSeverity {
+  if (value !== "info" && value !== "warning" && value !== "error") throw new Error("Invalid session warning severity");
+  return value;
+}
+
+function parseSessionWarningDismiss(value: unknown): { id: string } | undefined {
+  if (value === undefined) return undefined;
+  const record = requireRecord(value);
+  return { id: requireString(record, "id") };
+}
+
+function parseSessionWarning(value: unknown): SessionWarning {
+  const record = requireRecord(value);
+  const dismiss = parseSessionWarningDismiss(record["dismiss"]);
+  return {
+    severity: parseSessionWarningSeverity(record["severity"]),
+    message: requireString(record, "message"),
+    ...optionalField("source", optionalString(record, "source")),
+    ...optionalField("path", optionalString(record, "path")),
+    ...(dismiss === undefined ? {} : { dismiss }),
+  };
+}
+
+function optionalWarnings(value: unknown): Pick<SessionStatus, "warnings"> | object {
+  if (value === undefined) return {};
+  return { warnings: arrayOf(parseSessionWarning)(value) };
+}
+
+function parseAskUserQuestionOption(value: unknown): AskUserQuestionOption {
+  const record = requireRecord(value);
+  return {
+    value: requireBoundedNonEmptyString(record, "value", ASK_USER_ID_MAX_LENGTH),
+    label: requireBoundedNonEmptyString(record, "label", ASK_USER_TEXT_MAX_LENGTH),
+    ...optionalField("detail", optionalBoundedNonEmptyString(record, "detail", ASK_USER_TEXT_MAX_LENGTH)),
+  };
+}
+
+function parseAskUserQuestion(value: unknown): AskUserQuestion {
+  const record = requireRecord(value);
+  const options = boundedArrayOf(record["options"], parseAskUserQuestionOption, ASK_USER_OPTION_LIMIT, "options");
+  assertUniqueStrings(options.map((option) => option.value), "ask option value");
+  const multiple = parseOptionalBoolean(record["multiple"], "multiple");
+  return {
+    id: requireBoundedNonEmptyString(record, "id", ASK_USER_ID_MAX_LENGTH),
+    question: requireBoundedNonEmptyString(record, "question", ASK_USER_TEXT_MAX_LENGTH),
+    ...optionalField("detail", optionalBoundedNonEmptyString(record, "detail", ASK_USER_TEXT_MAX_LENGTH)),
+    options,
+    ...(multiple === undefined ? {} : { multiple }),
+  };
+}
+
+/**
+ * Validate the session's open question set. A malformed ask must be dropped
+ * rather than rendered: the card asks the user to answer on the model's behalf,
+ * so questions or options the daemon did not really send must never appear.
+ */
+function parsePendingAskUser(value: unknown): PendingAskUser {
+  const record = requireRecord(value);
+  const questions = boundedArrayOf(record["questions"], parseAskUserQuestion, ASK_USER_QUESTION_LIMIT, "questions");
+  if (questions.length === 0) throw new Error("Pending ask has no questions");
+  assertUniqueStrings(questions.map((question) => question.id), "ask question id");
+  return {
+    askId: requireBoundedNonEmptyString(record, "askId", ASK_USER_ID_MAX_LENGTH),
+    askedAt: requireNonEmptyString(record, "askedAt"),
+    questions,
+  };
+}
+
+function optionalPendingAsk(value: unknown): Pick<SessionStatus, "pendingAsk"> | object {
+  if (value === undefined) return {};
+  return { pendingAsk: parsePendingAskUser(value) };
+}
+
+export function parseSessionAskOpenedEvent(value: unknown): { type: "ask.opened"; ask: PendingAskUser } {
+  const record = requireRecord(value);
+  if (record["type"] !== "ask.opened") throw new Error("Invalid ask opened event type");
+  return { type: "ask.opened", ask: parsePendingAskUser(record["ask"]) };
+}
+
+export function parseSessionAskClosedEvent(value: unknown): { type: "ask.closed"; askId: string; reason: AskUserCloseReason } {
+  const record = requireRecord(value);
+  if (record["type"] !== "ask.closed") throw new Error("Invalid ask closed event type");
+  return {
+    type: "ask.closed",
+    askId: requireBoundedNonEmptyString(record, "askId", ASK_USER_ID_MAX_LENGTH),
+    reason: parseAskUserCloseReason(record["reason"]),
+  };
+}
+
+function parseAskUserCloseReason(value: unknown): AskUserCloseReason {
+  if (value !== "submitted" && value !== "superseded" && value !== "cancelled") throw new Error("Invalid ask close reason");
+  return value;
+}
+
+function parseAskUserQuestionRecord(value: unknown): AskUserQuestionRecord {
+  const record = requireRecord(value);
+  const question = parseAskUserQuestion(record["question"]);
+  const values = boundedArrayOf(record["values"], parseNonEmptyString, ASK_USER_OPTION_LIMIT, "values");
+  const offered = new Set(question.options.map((option) => option.value));
+  if (values.some((selected) => !offered.has(selected))) throw new Error("Ask answer selected an option the question never offered");
+  const otherText = optionalBoundedNonEmptyString(record, "otherText", ASK_USER_OTHER_TEXT_MAX_LENGTH);
+  const answered = requireBoolean(record, "answered");
+  // The record is the one thing both the model and the user read, so a flag that
+  // disagrees with the answer it describes is rejected rather than displayed.
+  if (answered !== (values.length > 0 || otherText !== undefined)) throw new Error("Ask answer contradicts its answered flag");
+  return { question, answered, values, ...(otherText === undefined ? {} : { otherText }) };
+}
+
+export function parseAskUserOutcome(value: unknown): AskUserOutcome {
+  const record = requireRecord(value);
+  const questions = boundedArrayOf(record["questions"], parseAskUserQuestionRecord, ASK_USER_QUESTION_LIMIT, "questions");
+  const answeredCount = requireNonNegativeSafeInteger(record, "answeredCount");
+  const unansweredIds = arrayOfString(record["unansweredIds"], "unansweredIds");
+  const unanswered = questions.filter((entry) => !entry.answered).map((entry) => entry.question.id);
+  if (answeredCount !== questions.length - unanswered.length) throw new Error("Ask outcome answered count mismatch");
+  if (unansweredIds.length !== unanswered.length || unansweredIds.some((id, index) => id !== unanswered[index])) {
+    throw new Error("Ask outcome unanswered ids mismatch");
+  }
+  return {
+    askId: requireBoundedNonEmptyString(record, "askId", ASK_USER_ID_MAX_LENGTH),
+    reason: parseAskUserCloseReason(record["reason"]),
+    askedAt: requireNonEmptyString(record, "askedAt"),
+    closedAt: requireNonEmptyString(record, "closedAt"),
+    questions,
+    answeredCount,
+    unansweredIds,
+    summary: requireNonEmptyString(record, "summary"),
+  };
+}
+
+export function parseAskUserCloseResponse(value: unknown): AskUserCloseResponse {
+  const record = requireRecord(value);
+  const result = record["result"];
+  if (result !== "closed" && result !== "stale") throw new Error("Invalid ask close result");
+  const outcome = record["outcome"] === undefined ? undefined : parseAskUserOutcome(record["outcome"]);
+  // Only the call that actually closed the ask carries an outcome; a stale close
+  // reports none and is trusted for the session status alone.
+  if ((result === "closed") !== (outcome !== undefined)) throw new Error("Ask close response outcome mismatch");
+  return {
+    result,
+    ...(outcome === undefined ? {} : { outcome }),
+    sessionStatus: parseSessionStatus(record["sessionStatus"]),
+  };
+}
+
+export function parseExtensionDialogCloseResponse(value: unknown): ExtensionDialogCloseResponse {
+  const record = requireRecord(value);
+  const result = record["result"];
+  if (result !== "closed" && result !== "stale") throw new Error("Invalid dialog close result");
+  const outcome = record["outcome"] === undefined ? undefined : parseExtensionDialogOutcome(record["outcome"]);
+  // Only the call that actually closed the dialog carries an outcome; a stale
+  // close reports none and is trusted for the session status alone.
+  if ((result === "closed") !== (outcome !== undefined)) throw new Error("Dialog close response outcome mismatch");
+  return {
+    result,
+    ...(outcome === undefined ? {} : { outcome }),
+    sessionStatus: parseSessionStatus(record["sessionStatus"]),
+  };
+}
+
+function assertUniqueStrings(values: readonly string[], label: string): void {
+  if (new Set(values).size !== values.length) throw new Error(`Duplicate ${label}`);
+}
+
+function parseExtensionDialogKind(value: unknown): ExtensionDialogKind {
+  if (value !== "confirm" && value !== "select" && value !== "input") throw new Error("Invalid extension dialog kind");
+  return value;
+}
+
+function parseExtensionDialogCloseReason(value: unknown): ExtensionDialogCloseReason {
+  if (value !== "answered" && value !== "cancelled" && value !== "timeout" && value !== "aborted" && value !== "session-ended") {
+    throw new Error("Invalid extension dialog close reason");
+  }
+  return value;
+}
+
+function parseExtensionDialogAnswer(value: unknown): ExtensionDialogAnswer {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string" && value.length <= EXTENSION_DIALOG_INPUT_MAX_LENGTH) return value;
+  throw new Error("Invalid extension dialog answer");
+}
+
+function parseExtensionDialogOption(value: unknown): string {
+  const option = parseNonEmptyString(value);
+  if (option.length > EXTENSION_DIALOG_TEXT_MAX_LENGTH) throw new Error("String field exceeds limit: option");
+  return option;
+}
+
+/**
+ * Validate one open extension dialog. A malformed dialog must be dropped rather
+ * than rendered: the card parks an extension's blocking wait on the user's
+ * answer, so a choice list or prompt the daemon did not really send must never
+ * appear.
+ */
+function parsePendingExtensionDialog(value: unknown): PendingExtensionDialog {
+  const record = requireRecord(value);
+  const kind = parseExtensionDialogKind(record["kind"]);
+  const options = record["options"] === undefined
+    ? undefined
+    : boundedArrayOf(record["options"], parseExtensionDialogOption, EXTENSION_DIALOG_OPTION_LIMIT, "options");
+  if (options !== undefined) assertUniqueStrings(options, "dialog option");
+  if (kind === "select" && (options === undefined || options.length === 0)) throw new Error("Select dialog has no options");
+  return {
+    dialogId: requireBoundedNonEmptyString(record, "dialogId", EXTENSION_DIALOG_ID_MAX_LENGTH),
+    kind,
+    title: requireBoundedNonEmptyString(record, "title", EXTENSION_DIALOG_TEXT_MAX_LENGTH),
+    ...optionalField("message", optionalBoundedNonEmptyString(record, "message", EXTENSION_DIALOG_TEXT_MAX_LENGTH)),
+    ...(options === undefined ? {} : { options }),
+    ...optionalField("placeholder", optionalBoundedNonEmptyString(record, "placeholder", EXTENSION_DIALOG_TEXT_MAX_LENGTH)),
+    askedAt: requireNonEmptyString(record, "askedAt"),
+    ...optionalField("timeoutAt", optionalNonEmptyString(record, "timeoutAt")),
+    runScoped: requireBoolean(record, "runScoped"),
+  };
+}
+
+function optionalPendingDialogs(value: unknown): Pick<SessionStatus, "pendingDialogs"> | object {
+  if (value === undefined) return {};
+  const dialogs = arrayOf(parsePendingExtensionDialog)(value);
+  assertUniqueStrings(dialogs.map((dialog) => dialog.dialogId), "dialog id");
+  return { pendingDialogs: dialogs };
+}
+
+export function parseSessionDialogOpenedEvent(value: unknown): { type: "dialog.opened"; dialog: PendingExtensionDialog } {
+  const record = requireRecord(value);
+  if (record["type"] !== "dialog.opened") throw new Error("Invalid dialog opened event type");
+  return { type: "dialog.opened", dialog: parsePendingExtensionDialog(record["dialog"]) };
+}
+
+export function parseSessionDialogClosedEvent(value: unknown): { type: "dialog.closed"; dialogId: string; reason: ExtensionDialogCloseReason; answer?: ExtensionDialogAnswer } {
+  const record = requireRecord(value);
+  if (record["type"] !== "dialog.closed") throw new Error("Invalid dialog closed event type");
+  const reason = parseExtensionDialogCloseReason(record["reason"]);
+  const answer = record["answer"] === undefined ? undefined : parseExtensionDialogAnswer(record["answer"]);
+  // Only an answered close carries a value; any other combination cannot be
+  // rendered honestly as the dialog's result.
+  if ((reason === "answered") !== (answer !== undefined)) throw new Error("Dialog closed event answer mismatch");
+  return {
+    type: "dialog.closed",
+    dialogId: requireBoundedNonEmptyString(record, "dialogId", EXTENSION_DIALOG_ID_MAX_LENGTH),
+    reason,
+    ...(answer === undefined ? {} : { answer }),
+  };
+}
+
+export function parseExtensionDialogOutcome(value: unknown): ExtensionDialogOutcome {
+  const record = requireRecord(value);
+  const reason = parseExtensionDialogCloseReason(record["reason"]);
+  const answer = record["answer"] === undefined ? undefined : parseExtensionDialogAnswer(record["answer"]);
+  if ((reason === "answered") !== (answer !== undefined)) throw new Error("Dialog outcome answer mismatch");
+  return {
+    dialogId: requireBoundedNonEmptyString(record, "dialogId", EXTENSION_DIALOG_ID_MAX_LENGTH),
+    reason,
+    ...(answer === undefined ? {} : { answer }),
+    askedAt: requireNonEmptyString(record, "askedAt"),
+    closedAt: requireNonEmptyString(record, "closedAt"),
+  };
+}
+
+function optionalNonEmptyString(record: Record<string, unknown>, key: string): string | undefined {
+  const value = optionalString(record, key);
+  if (value === undefined) return undefined;
+  if (value === "") throw new Error(`Expected non-empty string field: ${key}`);
+  return value;
 }
 
 export function parseSessionStatus(value: unknown): SessionStatus {
@@ -192,7 +462,500 @@ export function parseSessionStatus(value: unknown): SessionStatus {
     ...optionalModel(record["model"]),
     ...optionalContextUsage(record["contextUsage"]),
     ...optionalField("thinkingLevel", optionalString(record, "thinkingLevel")),
+    ...optionalWarnings(record["warnings"]),
+    ...optionalPendingAsk(record["pendingAsk"]),
+    ...optionalPendingDialogs(record["pendingDialogs"]),
   };
+}
+
+export function parseSessionStreamSnapshot(value: unknown): SessionStreamSnapshot {
+  const record = requireRecord(value);
+  return {
+    seq: requireNumber(record, "seq"),
+    partial: record["partial"] ?? null,
+  };
+}
+
+export function parseSessionUnreadCatalogSnapshot(value: unknown): SessionUnreadCatalogSnapshot {
+  const record = requireRecord(value);
+  const catalogRevision = requireNonNegativeSafeInteger(record, "catalogRevision");
+  const sessions = boundedArrayOf(record["sessions"], parseSessionUnreadSummary, SESSION_UNREAD_LIMIT, "sessions");
+  assertUniqueUnreadSummaries(sessions);
+  assertUnreadNewestFirst(sessions);
+  if (sessions.some((summary) => summary.completionOrder > catalogRevision)) {
+    throw new Error("Session unread completion order exceeds catalog revision");
+  }
+  return {
+    catalogId: requireBoundedNonEmptyString(record, "catalogId", SESSION_UNREAD_CATALOG_ID_MAX_LENGTH),
+    catalogRevision,
+    sessions,
+  };
+}
+
+export function parseSessionUnreadEvent(value: unknown): SessionUnreadEvent {
+  const record = requireRecord(value);
+  if (record["type"] !== "sessions.unread") throw new Error("Invalid session unread event type");
+  const sessionId = requireBoundedNonEmptyString(record, "sessionId", SESSION_UNREAD_SESSION_ID_MAX_LENGTH);
+  const cwd = requireBoundedNonEmptyString(record, "cwd", SESSION_UNREAD_CWD_MAX_LENGTH);
+  const catalogRevision = requirePositiveSafeInteger(record, "catalogRevision");
+  const unread = record["unread"] === null ? null : parseSessionUnreadSummary(record["unread"]);
+  if (unread !== null && (unread.sessionId !== sessionId || unread.cwd !== cwd)) {
+    throw new Error("Session unread event identity mismatch");
+  }
+  if (unread !== null && unread.completionOrder > catalogRevision) {
+    throw new Error("Session unread completion order exceeds catalog revision");
+  }
+  return {
+    type: "sessions.unread",
+    catalogId: requireBoundedNonEmptyString(record, "catalogId", SESSION_UNREAD_CATALOG_ID_MAX_LENGTH),
+    catalogRevision,
+    sessionId,
+    cwd,
+    unread,
+  };
+}
+
+/**
+ * Validate a startup progress frame. The browser substitutes its own wording
+ * from this event, so a malformed frame must be dropped rather than rendered:
+ * `startupToken` is the routing key when present, and an activity missing its
+ * phase or label could otherwise blank out or freeze the text a user is reading
+ * while they wait. An absent token is valid — an open routes by session id — but
+ * a present empty one is not, since it could match no row honestly.
+ */
+export function parseSessionStartupProgressEvent(value: unknown): SessionStartupProgressEvent {
+  const record = requireRecord(value);
+  if (record["type"] !== "session.startup") throw new Error("Invalid session startup event type");
+  const startupToken = optionalString(record, "startupToken");
+  if (startupToken === "") throw new Error("Expected non-empty string field: startupToken");
+  return {
+    type: "session.startup",
+    ...optionalField("startupToken", startupToken),
+    activity: parseSessionActivity(record["activity"]),
+  };
+}
+
+function parseSessionActivity(value: unknown): SessionActivity {
+  const record = requireRecord(value);
+  return {
+    sessionId: requireNonEmptyString(record, "sessionId"),
+    phase: requireSessionActivityPhase(record, "phase"),
+    label: requireNonEmptyString(record, "label"),
+    ...optionalField("detail", optionalString(record, "detail")),
+    at: requireNonEmptyString(record, "at"),
+    ...optionalField("startup", optionalActivityStartupMarker(record)),
+  };
+}
+
+/**
+ * The startup marker says the activity is a session opening rather than work in
+ * progress, which decides whether "Stop Active Work" is offered and whether a
+ * reload is blocked. A malformed marker is rejected rather than guessed at.
+ */
+function optionalActivityStartupMarker(record: Record<string, unknown>): boolean | undefined {
+  const value = record["startup"];
+  if (value === undefined) return undefined;
+  if (typeof value !== "boolean") throw new Error("Expected optional boolean field: startup");
+  return value;
+}
+
+function requireSessionActivityPhase(record: Record<string, unknown>, key: string): SessionActivity["phase"] {
+  const value = requireString(record, key);
+  if (value !== "active" && value !== "idle" && value !== "error") throw new Error(`Expected session activity phase field: ${key}`);
+  return value;
+}
+
+/**
+ * Socket stream frame validation. The session and realtime sockets accept only
+ * the frame types validated here: these frames render transcript content,
+ * status, and workspace state straight into the UI, so a malformed frame must
+ * be dropped at the socket boundary rather than trusted on its type name
+ * alone. Each validator rebuilds the event from checked fields only, so stray
+ * fields do not pass the boundary either.
+ */
+export function parseSessionStreamEvent(value: unknown): SessionUiEvent {
+  const record = requireRecord(value);
+  switch (record["type"]) {
+    case "message.append":
+      // The message payload is a projected Pi message; only its presence is
+      // guaranteed at this boundary.
+      return { type: "message.append", message: requirePresent(record, "message") };
+    case "assistant.delta":
+      return { type: "assistant.delta", text: requireString(record, "text") };
+    case "assistant.thinking.delta":
+      return { type: "assistant.thinking.delta", text: requireString(record, "text") };
+    case "tool.start":
+      return {
+        type: "tool.start",
+        toolName: requireString(record, "toolName"),
+        toolCallId: requireString(record, "toolCallId"),
+        summary: requireString(record, "summary"),
+        ...optionalField("args", record["args"]),
+      };
+    case "tool.update":
+      return {
+        type: "tool.update",
+        toolName: requireString(record, "toolName"),
+        toolCallId: requireString(record, "toolCallId"),
+        text: requireString(record, "text"),
+        ...optionalField("content", record["content"]),
+        ...optionalField("details", record["details"]),
+      };
+    case "tool.end":
+      return {
+        type: "tool.end",
+        toolName: requireString(record, "toolName"),
+        toolCallId: requireString(record, "toolCallId"),
+        text: requireString(record, "text"),
+        isError: requireBoolean(record, "isError"),
+        ...optionalField("content", record["content"]),
+        ...optionalField("details", record["details"]),
+      };
+    case "shell.start":
+      return {
+        type: "shell.start",
+        command: requireString(record, "command"),
+        ...optionalField("excludeFromContext", parseOptionalBoolean(record["excludeFromContext"], "excludeFromContext")),
+      };
+    case "shell.chunk":
+      return { type: "shell.chunk", chunk: requireString(record, "chunk") };
+    case "shell.end":
+      return {
+        type: "shell.end",
+        ...optionalField("output", optionalString(record, "output")),
+        ...optionalField("exitCode", optionalNumberOrNull(record, "exitCode")),
+        ...optionalField("cancelled", parseOptionalBoolean(record["cancelled"], "cancelled")),
+        ...optionalField("truncated", parseOptionalBoolean(record["truncated"], "truncated")),
+        ...optionalField("fullOutputPath", optionalString(record, "fullOutputPath")),
+        ...optionalField("isError", parseOptionalBoolean(record["isError"], "isError")),
+      };
+    case "agent.start":
+      return { type: "agent.start" };
+    case "agent.end":
+      return { type: "agent.end" };
+    case "message.end":
+      return { type: "message.end", ...optionalField("message", record["message"]) };
+    case "status.update":
+      return { type: "status.update", status: parseSessionStatus(record["status"]) };
+    case "activity.update":
+      return { type: "activity.update", activity: parseSessionActivity(record["activity"]) };
+    case "command.output":
+      return parseCommandOutputEvent(record);
+    case "session.error":
+      return { type: "session.error", message: requireString(record, "message") };
+    case "session.name":
+      return parseSessionNameEvent(record);
+    case "session.created":
+      return { type: "session.created", session: parseSessionInfo(record["session"]) };
+    case "pi.event":
+      return { type: "pi.event", eventType: requireString(record, "eventType") };
+    default:
+      throw new Error("Unsupported session stream event type");
+  }
+}
+
+type RealtimeStreamEvent =
+  | Extract<GlobalSessionEvent, { type: "status.update" | "activity.update" | "session.name" | "session.created" }>
+  | TerminalUiEvent
+  | WorkspaceActivityUiEvent;
+
+export function parseRealtimeStreamEvent(value: unknown): RealtimeStreamEvent {
+  const record = requireRecord(value);
+  switch (record["type"]) {
+    case "status.update":
+      return { type: "status.update", status: parseSessionStatus(record["status"]) };
+    case "activity.update":
+      return { type: "activity.update", activity: parseSessionActivity(record["activity"]) };
+    case "session.name":
+      return parseSessionNameEvent(record);
+    case "session.created":
+      return { type: "session.created", session: parseSessionInfo(record["session"]) };
+    case "terminal.created":
+      return { type: "terminal.created", terminal: parseTerminalInfo(record["terminal"]) };
+    case "terminal.exited":
+      return { type: "terminal.exited", terminal: parseTerminalInfo(record["terminal"]) };
+    case "terminal.closed":
+      return {
+        type: "terminal.closed",
+        terminalId: requireNonEmptyString(record, "terminalId"),
+        cwd: requireNonEmptyString(record, "cwd"),
+      };
+    case "workspace.activity":
+      return { type: "workspace.activity", activity: parseWorkspaceActivity(record["activity"]) };
+    default:
+      throw new Error("Unsupported realtime stream event type");
+  }
+}
+
+function requirePresent(record: Record<string, unknown>, key: string): unknown {
+  const value = record[key];
+  if (value === undefined) throw new Error(`Expected field: ${key}`);
+  return value;
+}
+
+function optionalNumberOrNull(record: Record<string, unknown>, key: string): number | null | undefined {
+  const value = record[key];
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "number") throw new Error(`Expected optional number|null field: ${key}`);
+  return value;
+}
+
+function parseCommandOutputEvent(record: Record<string, unknown>): Extract<SessionUiEvent, { type: "command.output" }> {
+  const level = requireString(record, "level");
+  if (level !== "info" && level !== "success" && level !== "error") throw new Error("Invalid command output level");
+  return {
+    type: "command.output",
+    level,
+    message: requireString(record, "message"),
+  };
+}
+
+function parseSessionNameEvent(record: Record<string, unknown>): Extract<SessionUiEvent, { type: "session.name" }> {
+  return {
+    type: "session.name",
+    sessionId: requireNonEmptyString(record, "sessionId"),
+    ...optionalField("name", optionalString(record, "name")),
+  };
+}
+
+function parseSessionUnreadSummary(value: unknown): SessionUnreadSummary {
+  const record = requireRecord(value);
+  const completedAt = requireBoundedNonEmptyString(
+    record,
+    "completedAt",
+    SESSION_UNREAD_COMPLETED_AT_MAX_LENGTH,
+  );
+  const completedDate = new Date(completedAt);
+  if (!Number.isFinite(completedDate.getTime()) || completedDate.toISOString() !== completedAt) {
+    throw new Error("Invalid canonical session unread completion time");
+  }
+  return {
+    sessionId: requireBoundedNonEmptyString(record, "sessionId", SESSION_UNREAD_SESSION_ID_MAX_LENGTH),
+    cwd: requireBoundedNonEmptyString(record, "cwd", SESSION_UNREAD_CWD_MAX_LENGTH),
+    completionOrder: requirePositiveSafeInteger(record, "completionOrder"),
+    completedAt,
+  };
+}
+
+function assertUniqueUnreadSummaries(summaries: readonly SessionUnreadSummary[]): void {
+  const identities = summaries.map((summary) => JSON.stringify([summary.sessionId, summary.cwd]));
+  if (new Set(identities).size !== identities.length) throw new Error("Duplicate session unread identity");
+  const completionOrders = summaries.map((summary) => summary.completionOrder);
+  if (new Set(completionOrders).size !== completionOrders.length) throw new Error("Duplicate session unread completion order");
+}
+
+function assertUnreadNewestFirst(summaries: readonly SessionUnreadSummary[]): void {
+  for (let index = 1; index < summaries.length; index += 1) {
+    const previous = summaries[index - 1];
+    const current = summaries[index];
+    if (previous === undefined || current === undefined || previous.completionOrder <= current.completionOrder) {
+      throw new Error("Session unread summaries are not newest-first");
+    }
+  }
+}
+
+function requireBoundedNonEmptyString(record: Record<string, unknown>, key: string, maxLength: number): string {
+  const value = requireNonEmptyString(record, key);
+  if (value.length > maxLength) throw new Error(`String field exceeds limit: ${key}`);
+  return value;
+}
+
+function optionalBoundedNonEmptyString(record: Record<string, unknown>, key: string, maxLength: number): string | undefined {
+  const value = optionalString(record, key);
+  if (value === undefined) return undefined;
+  if (value === "") throw new Error(`Expected non-empty string field: ${key}`);
+  if (value.length > maxLength) throw new Error(`String field exceeds limit: ${key}`);
+  return value;
+}
+
+function requirePositiveSafeInteger(record: Record<string, unknown>, key: string): number {
+  const value = requireNonNegativeSafeInteger(record, key);
+  if (value === 0) throw new Error(`Expected positive safe integer field: ${key}`);
+  return value;
+}
+
+export function parseSessionNotificationInboxSnapshot(value: unknown): SessionNotificationInboxSnapshot {
+  const record = requireRecord(value);
+  const summary = parseSessionNotificationSummary(record["summary"]);
+  const notifications = boundedArrayOf(record["notifications"], parseSessionNotification, SESSION_NOTIFICATION_LIMIT, "notifications");
+  assertUniqueNotifications(notifications);
+  assertNewestFirst(notifications);
+  if (summary.retainedCount !== notifications.length) throw new Error("Notification snapshot retained count mismatch");
+  if (summary.highestSeverity !== highestNotificationSeverity(notifications)) throw new Error("Notification snapshot severity mismatch");
+  const dismissThrough = parseSessionNotificationDismissThrough(record["dismissThrough"]);
+  const newestOrder = notifications[0]?.order ?? 0;
+  if (dismissThrough.order !== newestOrder) throw new Error("Notification snapshot dismiss cutoff mismatch");
+  if (dismissThrough.overflowWatermark < summary.discardedCount) throw new Error("Notification snapshot overflow cutoff mismatch");
+  return {
+    daemonInstanceId: requireNonEmptyString(record, "daemonInstanceId"),
+    catalogRevision: requireNonNegativeSafeInteger(record, "catalogRevision"),
+    summary,
+    notifications,
+    dismissThrough,
+  };
+}
+
+export function parseSessionNotificationInboxEvent(value: unknown): SessionNotificationInboxEvent {
+  const record = requireRecord(value);
+  if (record["type"] !== "notifications.inbox") throw new Error("Invalid notification inbox event type");
+  const summary = parseSessionNotificationSummary(record["summary"]);
+  const dismissThrough = parseSessionNotificationDismissThrough(record["dismissThrough"]);
+  if (dismissThrough.overflowWatermark < summary.discardedCount) throw new Error("Notification event overflow cutoff mismatch");
+  const delta = parseSessionNotificationInboxDelta(record["delta"]);
+  if (delta.kind === "cleared" && !notificationSummaryIsEmpty(summary)) throw new Error("Notification clear event summary mismatch");
+  if (delta.kind === "added" && summary.retainedCount === 0) throw new Error("Notification add event summary mismatch");
+  return {
+    type: "notifications.inbox",
+    daemonInstanceId: requireNonEmptyString(record, "daemonInstanceId"),
+    catalogRevision: requireNonNegativeSafeInteger(record, "catalogRevision"),
+    summary,
+    dismissThrough,
+    delta,
+  };
+}
+
+function parseSessionNotificationSummary(value: unknown): SessionNotificationSummary {
+  const record = requireRecord(value);
+  const retainedCount = requireNonNegativeSafeInteger(record, "retainedCount");
+  if (retainedCount > SESSION_NOTIFICATION_LIMIT) throw new Error("Notification retained count exceeds limit");
+  const discardedCount = requireNonNegativeSafeInteger(record, "discardedCount");
+  const highestSeverity = optionalSessionNotificationSeverity(record["highestSeverity"]);
+  if ((retainedCount === 0) !== (highestSeverity === undefined)) throw new Error("Notification summary severity mismatch");
+  return {
+    sessionId: requireNonEmptyString(record, "sessionId"),
+    cwd: requireNonEmptyString(record, "cwd"),
+    inboxRevision: requireNonNegativeSafeInteger(record, "inboxRevision"),
+    retainedCount,
+    discardedCount,
+    ...(highestSeverity === undefined ? {} : { highestSeverity }),
+  };
+}
+
+function parseSessionNotification(value: unknown): SessionNotification {
+  const record = requireRecord(value);
+  const message = requireString(record, "message");
+  if (new TextEncoder().encode(message).byteLength > SESSION_NOTIFICATION_MESSAGE_BYTES) throw new Error("Notification message exceeds byte limit");
+  const receivedAt = requireString(record, "receivedAt");
+  if (!Number.isFinite(Date.parse(receivedAt))) throw new Error("Invalid notification receive time");
+  const order = requireNonNegativeSafeInteger(record, "order");
+  if (order === 0) throw new Error("Invalid notification order");
+  return {
+    id: requireNonEmptyString(record, "id"),
+    message,
+    truncated: requireBoolean(record, "truncated"),
+    severity: parseSessionNotificationSeverity(record["severity"]),
+    receivedAt,
+    order,
+  };
+}
+
+function parseSessionNotificationDismissThrough(value: unknown): SessionNotificationDismissThrough {
+  const record = requireRecord(value);
+  return {
+    order: requireNonNegativeSafeInteger(record, "order"),
+    overflowWatermark: requireNonNegativeSafeInteger(record, "overflowWatermark"),
+  };
+}
+
+function parseSessionNotificationInboxDelta(value: unknown): SessionNotificationInboxDelta {
+  const record = requireRecord(value);
+  switch (record["kind"]) {
+    case "added": {
+      const evictedNotificationId = optionalString(record, "evictedNotificationId");
+      return {
+        kind: "added",
+        notification: parseSessionNotification(record["notification"]),
+        ...(evictedNotificationId === undefined ? {} : { evictedNotificationId }),
+      };
+    }
+    case "dismissed": {
+      const notificationIds = boundedArrayOf(record["notificationIds"], parseNonEmptyString, SESSION_NOTIFICATION_LIMIT, "notificationIds");
+      if (new Set(notificationIds).size !== notificationIds.length) throw new Error("Duplicate dismissed notification id");
+      return { kind: "dismissed", notificationIds };
+    }
+    case "cleared":
+      return { kind: "cleared", reason: parseSessionNotificationClearReason(record["reason"]) };
+    case "resync":
+      return { kind: "resync" };
+    default:
+      throw new Error("Invalid notification inbox delta");
+  }
+}
+
+function parseSessionNotificationSeverity(value: unknown): SessionNotificationSeverity {
+  if (value !== "info" && value !== "warning" && value !== "error") throw new Error("Invalid notification severity");
+  return value;
+}
+
+function optionalSessionNotificationSeverity(value: unknown): SessionNotificationSeverity | undefined {
+  return value === undefined ? undefined : parseSessionNotificationSeverity(value);
+}
+
+function parseSessionNotificationClearReason(value: unknown): SessionNotificationClearReason {
+  switch (value) {
+    case "runtime-close":
+    case "archive":
+    case "delete":
+    case "restore":
+    case "archive-reconcile":
+    case "replacement":
+    case "initialization-failed":
+    case "service-dispose":
+      return value;
+    default:
+      throw new Error("Invalid notification clear reason");
+  }
+}
+
+function boundedArrayOf<T>(value: unknown, parse: (item: unknown) => T, limit: number, field: string): T[] {
+  if (!Array.isArray(value)) throw new Error(`Expected array field: ${field}`);
+  if (value.length > limit) throw new Error(`Array field exceeds limit: ${field}`);
+  return value.map(parse);
+}
+
+function parseNonEmptyString(value: unknown): string {
+  if (typeof value !== "string" || value === "") throw new Error("Expected non-empty string");
+  return value;
+}
+
+function requireNonEmptyString(record: Record<string, unknown>, key: string): string {
+  const value = requireString(record, key);
+  if (value === "") throw new Error(`Expected non-empty string field: ${key}`);
+  return value;
+}
+
+function requireNonNegativeSafeInteger(record: Record<string, unknown>, key: string): number {
+  const value = record[key];
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new Error(`Expected non-negative safe integer field: ${key}`);
+  return value;
+}
+
+function assertUniqueNotifications(notifications: readonly SessionNotification[]): void {
+  if (new Set(notifications.map((notification) => notification.id)).size !== notifications.length) throw new Error("Duplicate notification id");
+  if (new Set(notifications.map((notification) => notification.order)).size !== notifications.length) throw new Error("Duplicate notification order");
+}
+
+function assertNewestFirst(notifications: readonly SessionNotification[]): void {
+  for (let index = 1; index < notifications.length; index += 1) {
+    const previous = notifications[index - 1];
+    const current = notifications[index];
+    if (previous === undefined || current === undefined || previous.order <= current.order) throw new Error("Notifications are not newest-first");
+  }
+}
+
+function notificationSummaryIsEmpty(summary: SessionNotificationSummary): boolean {
+  return summary.retainedCount === 0 && summary.discardedCount === 0;
+}
+
+function highestNotificationSeverity(notifications: readonly SessionNotification[]): SessionNotificationSeverity | undefined {
+  let highest: SessionNotificationSeverity | undefined;
+  for (const notification of notifications) {
+    if (notification.severity === "error") return "error";
+    if (notification.severity === "warning") highest = "warning";
+    else highest ??= "info";
+  }
+  return highest;
 }
 
 export function parseSessionCleanupPreviewResponse(value: unknown): SessionCleanupPreviewResponse {
@@ -331,7 +1094,15 @@ function parseAuthProviderStatus(value: unknown): AuthProviderStatus {
 
 function parseAuthProviderOption(value: unknown): AuthProviderOption {
   const record = requireRecord(value);
-  return { id: requireString(record, "id"), name: requireString(record, "name"), authType: parseAuthType(record["authType"]), status: parseAuthProviderStatus(record["status"]) };
+  const loginFlow = record["loginFlow"];
+  if (loginFlow !== undefined && loginFlow !== "interactive") throw new Error("Invalid auth provider login flow");
+  return {
+    id: requireString(record, "id"),
+    name: requireString(record, "name"),
+    authType: parseAuthType(record["authType"]),
+    status: parseAuthProviderStatus(record["status"]),
+    ...(loginFlow === undefined ? {} : { loginFlow }),
+  };
 }
 
 export function parseAuthProvidersResponse(value: unknown): AuthProvidersResponse {
@@ -354,6 +1125,7 @@ export function parseOAuthFlowState(value: unknown): OAuthFlowState {
     ...optionalField("auth", optionalOAuthAuth(record["auth"])),
     ...optionalField("prompt", optionalOAuthPrompt(record["prompt"])),
     ...optionalField("select", optionalOAuthSelect(record["select"])),
+    ...optionalField("info", optionalOAuthInfo(record["info"])),
   };
   return flow;
 }
@@ -366,21 +1138,60 @@ function parseOAuthFlowStatus(value: unknown): OAuthFlowState["status"] {
 function optionalOAuthAuth(value: unknown): OAuthFlowState["auth"] | undefined {
   if (value === undefined) return undefined;
   const record = requireRecord(value);
-  return { url: requireString(record, "url"), ...optionalField("instructions", optionalString(record, "instructions")) };
+  return {
+    url: requireString(record, "url"),
+    ...optionalField("instructions", optionalString(record, "instructions")),
+    ...optionalField("deviceCode", optionalOAuthDeviceCode(record["deviceCode"])),
+  };
+}
+
+function optionalOAuthDeviceCode(value: unknown): NonNullable<OAuthFlowState["auth"]>["deviceCode"] | undefined {
+  if (value === undefined) return undefined;
+  const record = requireRecord(value);
+  return {
+    userCode: requireString(record, "userCode"),
+    ...optionalField("intervalSeconds", optionalNumber(record, "intervalSeconds")),
+    ...optionalField("expiresInSeconds", optionalNumber(record, "expiresInSeconds")),
+  };
 }
 
 function optionalOAuthPrompt(value: unknown): OAuthFlowState["prompt"] | undefined {
   if (value === undefined) return undefined;
   const record = requireRecord(value);
-  const kind = requireString(record, "kind");
-  if (kind !== "prompt" && kind !== "manual") throw new Error("Invalid OAuth prompt kind");
-  return { requestId: requireString(record, "requestId"), message: requireString(record, "message"), kind, ...optionalField("placeholder", optionalString(record, "placeholder")), ...(record["allowEmpty"] === true ? { allowEmpty: true } : {}) };
+  return {
+    requestId: requireString(record, "requestId"),
+    message: requireString(record, "message"),
+    promptType: parseOAuthPromptType(record["promptType"]),
+    ...optionalField("placeholder", optionalString(record, "placeholder")),
+    ...optionalField("allowEmpty", optionalBoolean(record, "allowEmpty")),
+  };
+}
+
+function parseOAuthPromptType(value: unknown): "text" | "secret" | "manual_code" {
+  if (value !== "text" && value !== "secret" && value !== "manual_code") throw new Error("Invalid OAuth prompt type");
+  return value;
 }
 
 function optionalOAuthSelect(value: unknown): OAuthFlowState["select"] | undefined {
   if (value === undefined) return undefined;
   const record = requireRecord(value);
   return { requestId: requireString(record, "requestId"), message: requireString(record, "message"), options: arrayOf(parseCommandOption)(record["options"]) };
+}
+
+function optionalOAuthInfo(value: unknown): OAuthFlowState["info"] | undefined {
+  if (value === undefined) return undefined;
+  return arrayOf((item) => {
+    const record = requireRecord(item);
+    return {
+      message: requireString(record, "message"),
+      ...optionalField("links", record["links"] === undefined ? undefined : arrayOf(parseOAuthInfoLink)(record["links"])),
+    };
+  })(value);
+}
+
+function parseOAuthInfoLink(value: unknown): NonNullable<NonNullable<OAuthFlowState["info"]>[number]["links"]>[number] {
+  const record = requireRecord(value);
+  return { url: requireString(record, "url"), ...optionalField("label", optionalString(record, "label")) };
 }
 
 function optionalContextUsage(value: unknown): Pick<SessionStatus, "contextUsage"> | object {
@@ -458,12 +1269,12 @@ function optionalFileMediaType(value: unknown): FileContentResponse["mediaType"]
 
 export function parseGitStatusResponse(value: unknown): GitStatusResponse {
   const record = requireRecord(value);
-  return { isGitRepo: requireBoolean(record, "isGitRepo"), hash: requireString(record, "hash"), ...optionalField("branch", optionalString(record, "branch")), ...optionalField("upstream", optionalString(record, "upstream")), ...optionalField("ahead", optionalNumber(record, "ahead")), ...optionalField("behind", optionalNumber(record, "behind")), files: arrayOf(parseGitStatusFile)(record["files"]) };
+  return { isGitRepo: requireBoolean(record, "isGitRepo"), hash: requireString(record, "hash"), ...optionalField("branch", optionalString(record, "branch")), ...optionalField("upstream", optionalString(record, "upstream")), ...optionalField("ahead", optionalNumber(record, "ahead")), ...optionalField("behind", optionalNumber(record, "behind")), files: arrayOf(parseGitStatusFile)(record["files"]), submodules: record["submodules"] === undefined ? [] : arrayOfString(record["submodules"], "submodules") };
 }
 
 function parseGitStatusFile(value: unknown): GitStatusFile {
   const record = requireRecord(value);
-  return { path: requireString(record, "path"), ...optionalField("oldPath", optionalString(record, "oldPath")), index: parseGitFileState(record["index"]), workingTree: parseGitFileState(record["workingTree"]) };
+  return { path: requireString(record, "path"), ...optionalField("oldPath", optionalString(record, "oldPath")), index: parseGitFileState(record["index"]), workingTree: parseGitFileState(record["workingTree"]), ...optionalField("submoduleFromCommit", optionalString(record, "submoduleFromCommit")), ...optionalField("submoduleToCommit", optionalString(record, "submoduleToCommit")) };
 }
 
 function parseGitFileState(value: unknown): GitFileState {
@@ -562,8 +1373,19 @@ function parsePiWebConfigValues(value: unknown): PiWebConfigValues {
     ...optionalField("pathAccess", optionalPathAccess(record["pathAccess"])),
     ...optionalField("uploads", optionalUploads(record["uploads"])),
     ...optionalField("maxUploadBytes", optionalNumber(record, "maxUploadBytes")),
+    ...optionalField("agent", optionalAgent(record["agent"])),
     ...optionalField("spawnSessions", optionalBoolean(record, "spawnSessions")),
     ...optionalField("subsessions", optionalBoolean(record, "subsessions")),
+    ...optionalField("askUser", optionalBoolean(record, "askUser")),
+  };
+}
+
+function optionalAgent(value: unknown): PiWebConfigValues["agent"] | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value) || Array.isArray(value)) throw new Error("Invalid PI WEB agent field");
+  return {
+    ...optionalField("command", optionalString(value, "command")),
+    ...optionalField("dir", optionalString(value, "dir")),
   };
 }
 
@@ -629,7 +1451,25 @@ function optionalPlugins(value: unknown): PiWebPluginConfigMap | undefined {
 
 function parsePiWebConfigEnvOverrides(value: unknown): PiWebConfigEnvOverrides {
   const record = requireRecord(value);
-  return { host: requireBoolean(record, "host"), port: requireBoolean(record, "port"), allowedHosts: requireBoolean(record, "allowedHosts"), spawnSessions: requireBoolean(record, "spawnSessions"), subsessions: requireBoolean(record, "subsessions") };
+  return {
+    host: requireBoolean(record, "host"),
+    port: requireBoolean(record, "port"),
+    allowedHosts: requireBoolean(record, "allowedHosts"),
+    spawnSessions: requireBoolean(record, "spawnSessions"),
+    subsessions: requireBoolean(record, "subsessions"),
+    askUser: requireBoolean(record, "askUser"),
+    agentCommand: requireBoolean(record, "agentCommand"),
+    agentDir: requireBoolean(record, "agentDir"),
+    ...optionalAgentDirSource(record),
+    agentSessionDir: requireBoolean(record, "agentSessionDir"),
+  };
+}
+
+function optionalAgentDirSource(record: Record<string, unknown>): { agentDirSource?: PiWebAgentDirEnvSource } {
+  const value = record["agentDirSource"];
+  if (value === undefined) return {};
+  if (value !== "pi-web" && value !== "pi-compatibility") throw new Error("Invalid PI WEB agentDirSource field");
+  return { agentDirSource: value };
 }
 
 export function parsePiPackagesResponse(value: unknown): PiPackagesResponse {
@@ -699,6 +1539,13 @@ function parseOptionalBoolean(value: unknown, key: string): boolean | undefined 
   return value;
 }
 
+/** Optional non-negative integer count; zero is normalized away so absent and none read alike. */
+function parseOptionalCount(value: unknown, key: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) throw new Error(`Expected optional count field: ${key}`);
+  return value === 0 ? undefined : value;
+}
+
 export function parsePiWebStatusResponse(value: unknown): PiWebStatusResponse {
   const record = requireRecord(value);
   return {
@@ -733,12 +1580,17 @@ function parsePiWebRuntimeComponents(value: unknown): PiWebRuntimeResponse["comp
 
 function parsePiWebRuntimeComponent(value: unknown): PiWebRuntimeComponent {
   const record = requireRecord(value);
+  const component = parsePiWebServiceComponent(record["component"]);
+  const activeAgentProfileValue = record["activeAgentProfile"];
+  const activeAgentProfile = activeAgentProfileValue === undefined ? undefined : parseActiveAgentProfileDescriptor(activeAgentProfileValue);
+  if (activeAgentProfileValue !== undefined && (component !== "sessiond" || activeAgentProfile === undefined)) throw new Error("Invalid active agent profile descriptor");
   return {
-    component: parsePiWebServiceComponent(record["component"]),
+    component,
     label: requireString(record, "label"),
     ...optionalField("runtimeVersion", optionalString(record, "runtimeVersion")),
     available: requireBoolean(record, "available"),
     capabilities: parsePiWebCapabilities(record["capabilities"]),
+    ...optionalField("activeAgentProfile", activeAgentProfile),
     ...optionalField("error", optionalString(record, "error")),
   };
 }
@@ -831,8 +1683,93 @@ export function parseCommandResult(value: unknown): CommandResult {
   const type = requireString(record, "type");
   if (type === "unsupported") return { type, message: requireString(record, "message") };
   if (type === "select") return { type, requestId: requireString(record, "requestId"), title: requireString(record, "title"), options: arrayOf(parseCommandOption)(record["options"]) };
+  if (type === "tree") return { type, tree: parseSessionTreeSnapshot(record["tree"]) };
   if (type === "done") return { type, ...optionalField("message", optionalString(record, "message")), ...optionalSession(record["session"]), ...optionalField("promptDraft", optionalString(record, "promptDraft")) };
   throw new Error("Invalid command result type");
+}
+
+export function parseSessionTreeSnapshot(value: unknown): SessionTreeSnapshot {
+  const record = requireRecord(value);
+  const nodes = arrayOf(parseSessionTreeNode)(record["nodes"]);
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  if (nodeIds.size !== nodes.length) throw new Error("Duplicate session tree node id");
+  const activeLeafId = requireNullableString(record, "activeLeafId");
+  if (activeLeafId !== null && !nodeIds.has(activeLeafId)) throw new Error("Invalid session tree activeLeafId");
+  return {
+    nodes,
+    activeLeafId,
+    activePathIds: arrayOfNonBlankString(record["activePathIds"], "activePathIds"),
+  };
+}
+
+function parseSessionTreeNode(value: unknown): SessionTreeNode {
+  const record = requireRecord(value);
+  return {
+    id: requireNonBlankString(record, "id"),
+    parentId: requireNullableString(record, "parentId"),
+    kind: parseSessionTreeNodeKind(record["kind"]),
+    summary: requireString(record, "summary"),
+    ...optionalField("timestamp", optionalString(record, "timestamp")),
+    ...optionalField("label", optionalString(record, "label")),
+  };
+}
+
+function parseSessionTreeNodeKind(value: unknown): SessionTreeNodeKind {
+  switch (value) {
+    case "user":
+    case "assistant":
+    case "tool-result":
+    case "bash":
+    case "custom-message":
+    case "compaction":
+    case "branch-summary":
+    case "model-change":
+    case "thinking-level-change":
+    case "session-info":
+    case "label":
+    case "custom":
+    case "other":
+      return value;
+    default:
+      throw new Error("Invalid session tree node kind");
+  }
+}
+
+export function parseSessionTreeNavigateResult(value: unknown): SessionTreeNavigateResult {
+  const record = requireRecord(value);
+  const cancelled = requireBoolean(record, "cancelled");
+  if (Object.hasOwn(record, "summaryEntry")) throw new Error("Invalid session tree navigation result field: summaryEntry");
+  if (cancelled) {
+    rejectResponseField(record, "editorText", "session tree cancellation result");
+    const aborted = record["aborted"];
+    if (aborted !== undefined && typeof aborted !== "boolean") throw new Error("Expected optional boolean field: aborted");
+    return { cancelled, ...(aborted === undefined ? {} : { aborted }) };
+  }
+  rejectResponseField(record, "aborted", "session tree navigation result");
+  return { cancelled, ...optionalField("editorText", optionalString(record, "editorText")) };
+}
+
+function rejectResponseField(record: Record<string, unknown>, field: string, label: string): void {
+  if (Object.hasOwn(record, field)) throw new Error(`Invalid ${label} field: ${field}`);
+}
+
+function requireNullableString(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key];
+  if (value !== null && typeof value !== "string") throw new Error(`Expected string or null field: ${key}`);
+  if (typeof value === "string" && value.trim() === "") throw new Error(`Expected non-blank string or null field: ${key}`);
+  return value;
+}
+
+function requireNonBlankString(record: Record<string, unknown>, key: string): string {
+  const value = requireString(record, key);
+  if (value.trim() === "") throw new Error(`Expected non-blank string field: ${key}`);
+  return value;
+}
+
+function arrayOfNonBlankString(value: unknown, key: string): string[] {
+  const strings = arrayOfString(value, key);
+  if (strings.some((item) => item.trim() === "")) throw new Error(`Expected non-blank string array field: ${key}`);
+  return strings;
 }
 
 function parseCommandOption(value: unknown): CommandOption {
@@ -896,12 +1833,6 @@ export function parseRestored(value: unknown): { restored: true } {
   const record = requireRecord(value);
   if (record["restored"] !== true) throw new Error("Expected restored response");
   return { restored: true };
-}
-
-export function parseDeleted(value: unknown): { deleted: true } {
-  const record = requireRecord(value);
-  if (record["deleted"] !== true) throw new Error("Expected deleted response");
-  return { deleted: true };
 }
 
 export function parseDetached(value: unknown): { detached: true } {

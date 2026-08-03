@@ -14,6 +14,7 @@ export class ProjectList extends LitElement implements KeyboardNavigableSection 
   @property({ attribute: false }) selected?: Project;
   @property({ attribute: false }) activities: Record<string, WorkspaceActivity> = {};
   @property({ attribute: false }) workspacesByProjectId: Record<string, Workspace[]> = {};
+  @property({ attribute: false }) unreadProjectIds: ReadonlySet<string> = new Set();
   @property({ type: Boolean, reflect: true }) collapsible = false;
   @property({ type: Boolean, reflect: true }) collapsed = false;
   @property({ attribute: false }) onSelect?: (project: Project) => void;
@@ -64,7 +65,7 @@ export class ProjectList extends LitElement implements KeyboardNavigableSection 
                 @keydown=${(event: KeyboardEvent) => { this.handleProjectKeydown(event, project); }}
               >
                 <div class="action-main">
-                  <span class="action-name">${project.name}</span><small>${project.path}</small>
+                  <span class="workspace-primary"><span class="workspace-primary-label">${project.name}</span></span><small>${project.path}</small>
                   ${this.renderActivity(project)}
                 </div>
                 <div class="action-menu">
@@ -93,7 +94,7 @@ export class ProjectList extends LitElement implements KeyboardNavigableSection 
   }
 
   private renderHeading() {
-    if (!this.collapsible) return "Projects";
+    if (!this.collapsible) return html`<span>Projects</span>`;
     const selectedSummary = this.selected?.name ?? "No project selected";
     const selectedTitle = this.selected?.path ?? selectedSummary;
     return html`<button class="section-toggle" aria-expanded=${String(!this.collapsed)} @click=${() => { this.onToggleCollapsed?.(); }}><span class="section-title"><span class="section-name">${this.collapsed ? "▸" : "▾"} Projects</span>${this.collapsed ? html`<small class="section-selected" title=${selectedTitle}>${selectedSummary}</small>` : null}</span><small class="section-count">${this.projects.length}</small></button>`;
@@ -101,7 +102,8 @@ export class ProjectList extends LitElement implements KeyboardNavigableSection 
 
   private renderActivity(project: Project) {
     const kind = projectActivityIndicator(project, this.workspacesByProjectId[project.id] ?? [], this.activities);
-    return renderActionActivityIndicator(kind, kind === "terminal" ? "Project terminal active" : "Project active");
+    const unreadLabel = this.unreadProjectIds.has(project.id) ? "Unread sessions in this project" : undefined;
+    return renderActionActivityIndicator(kind, kind === "terminal" ? "Project terminal active" : "Project active", unreadLabel);
   }
 
   private toggleMenu(projectId: string, target: EventTarget | null) {
