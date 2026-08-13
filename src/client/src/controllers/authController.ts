@@ -4,6 +4,12 @@ import { selectedMachineId, type GetState, type SetState } from "./types";
 
 type OAuthDialogState = Extract<AuthDialogState, { step: "oauth" }>;
 
+/** The one-shot server request a response is being submitted for. */
+interface OAuthResponseTarget {
+  flowId: string;
+  requestId: string;
+}
+
 export interface AuthControllerDependencies {
   api?: typeof defaultApi;
   pollIntervalMs?: number;
@@ -12,9 +18,16 @@ export interface AuthControllerDependencies {
 export class AuthController {
   private readonly api: typeof defaultApi;
   private readonly pollIntervalMs: number;
-  private oauthOperationGeneration = 0;
+  private authOperationGeneration = 0;
   private pollGeneration = 0;
   private pollTimer: number | undefined;
+  /**
+   * Response already in flight, if any. A login prompt or selection is a
+   * one-shot server request, so a second Enter or option click while the POST
+   * is in flight must be dropped instead of racing the first response.
+   * Cancellation deliberately ignores this guard and stays available.
+   */
+  private inFlightResponse: OAuthResponseTarget | undefined;
 
   constructor(
     private readonly getState: GetState,
@@ -27,8 +40,7 @@ export class AuthController {
   }
 
   dispose(): void {
-    this.oauthOperationGeneration += 1;
-    this.stopPolling();
+    this.advanceAuthOperation();
   }
 
   handleSlashCommand(text: string): boolean {
@@ -40,19 +52,26 @@ export class AuthController {
   }
 
   async openLogin(providerId?: string): Promise<void> {
+    const operationGeneration = this.advanceAuthOperation();
+    const machineId = selectedMachineId(this.getState());
     if (providerId !== undefined && providerId !== "") {
-      await this.openLoginProvider(providerId);
+      await this.openLoginProvider(providerId, machineId, operationGeneration);
       return;
     }
-    this.setState({ authDialog: { step: "method" } });
+    this.setState({ authDialog: { step: "method", machineId } });
   }
 
   async chooseLoginMethod(authType: AuthType): Promise<void> {
+    const dialog = this.getState().authDialog;
+    if (dialog?.step !== "method") return;
+    const operationGeneration = this.authOperationGeneration;
+    const { machineId } = dialog;
     try {
-      const { providers } = await this.api.authProviders({ mode: "login", authType, machineId: selectedMachineId(this.getState()) });
-      this.setState({ authDialog: { step: "providers", mode: "login", authType, providers } });
+      const { providers } = await this.api.authProviders({ mode: "login", authType, machineId });
+      if (!this.isCurrentAuthOperation(operationGeneration) || this.getState().authDialog !== dialog) return;
+      this.setState({ authDialog: { step: "providers", mode: "login", machineId, authType, providers } });
     } catch (error) {
-      this.setState({ error: String(error) });
+      if (this.isCurrentAuthOperation(operationGeneration) && this.getState().authDialog === dialog) this.setState({ error: String(error) });
     }
   }
 
@@ -61,35 +80,35 @@ export class AuthController {
     if (dialog?.step !== "providers") return;
     const provider = dialog.providers.find((candidate) => candidate.id === providerId && (authType === undefined || candidate.authType === authType));
     if (provider === undefined) return;
-    if (provider.authType === "oauth" || provider.loginFlow === "interactive") await this.startLoginFlow(provider);
+    if (provider.authType === "oauth" || provider.loginFlow === "interactive") {
+      const operationGeneration = this.advanceAuthOperation();
+      await this.startLoginFlow(provider, dialog.machineId, operationGeneration);
+    }
   }
 
   async openLogout(providerId?: string): Promise<void> {
+    const operationGeneration = this.advanceAuthOperation();
+    const machineId = selectedMachineId(this.getState());
     try {
-      const { providers } = await this.api.authProviders({ mode: "logout", machineId: selectedMachineId(this.getState()) });
+      const { providers } = await this.api.authProviders({ mode: "logout", machineId });
+      if (!this.isCurrentAuthOperation(operationGeneration)) return;
       if (providerId !== undefined && providerId !== "") {
         const provider = providers.find((candidate) => candidate.id === providerId);
-        if (provider !== undefined && !this.rejectRemoteOAuth("logout", provider)) await this.logoutProvider(provider.id);
-        else if (provider === undefined) this.setState({ error: `No stored credentials for ${providerId}` });
+        if (provider !== undefined) await this.logoutProviderOnMachine(provider.id, machineId, operationGeneration);
+        else this.setState({ error: `No stored credentials for ${providerId}` });
         return;
       }
-      this.setState({ authDialog: { step: "logout", providers } });
+      this.setState({ authDialog: { step: "logout", machineId, providers } });
     } catch (error) {
-      this.setState({ error: String(error) });
+      if (this.isCurrentAuthOperation(operationGeneration)) this.setState({ error: String(error) });
     }
   }
 
   async logoutProvider(providerId: string): Promise<void> {
     const dialog = this.getState().authDialog;
-    const provider = dialog?.step === "logout" ? dialog.providers.find((candidate) => candidate.id === providerId) : undefined;
-    if (provider !== undefined && this.rejectRemoteOAuth("logout", provider)) return;
-    try {
-      await this.api.logoutProvider(providerId, selectedMachineId(this.getState()));
-      this.closeDialog();
-      void this.refreshStatus();
-    } catch (error) {
-      this.setState({ error: String(error) });
-    }
+    if (dialog?.step !== "logout") return;
+    const operationGeneration = this.advanceAuthOperation();
+    await this.logoutProviderOnMachine(providerId, dialog.machineId, operationGeneration);
   }
 
   updateOAuthInput(value: string): void {
@@ -105,12 +124,15 @@ export class AuthController {
     if (dialog?.step !== "oauth") return;
     const request = dialog.flow.prompt ?? dialog.flow.select;
     if (request === undefined) return;
-    const operationGeneration = this.oauthOperationGeneration;
+    const operationGeneration = this.authOperationGeneration;
     const flowId = dialog.flow.flowId;
     const requestId = request.requestId;
+    const target: OAuthResponseTarget = { flowId, requestId };
+    if (isSameOAuthResponseTarget(this.inFlightResponse, target)) return;
     const responseValue = value ?? dialog.inputValue ?? "";
     const clean = { ...dialog };
     delete clean.error;
+    this.inFlightResponse = target;
     this.setState({ authDialog: { ...clean, responding: true } });
     try {
       const flow = await this.api.respondOAuthFlow(flowId, requestId, responseValue, dialog.machineId);
@@ -121,6 +143,9 @@ export class AuthController {
       const current = this.currentOAuthDialog(operationGeneration, flowId);
       if (current === undefined || oauthRequestId(current.flow) !== requestId) return;
       this.setState({ authDialog: { ...current, responding: false, error: String(error) } });
+    } finally {
+      // Only release the guard this call took: a later request may already own it.
+      if (isSameOAuthResponseTarget(this.inFlightResponse, target)) this.inFlightResponse = undefined;
     }
   }
 
@@ -141,41 +166,50 @@ export class AuthController {
   }
 
   closeDialog(): void {
-    this.oauthOperationGeneration += 1;
-    this.stopPolling();
+    this.advanceAuthOperation();
     this.setState({ authDialog: undefined });
   }
 
-  private async openLoginProvider(providerId: string): Promise<void> {
+  private async openLoginProvider(providerId: string, machineId: string, operationGeneration: number): Promise<void> {
     try {
-      const { providers } = await this.api.authProviders({ mode: "login", machineId: selectedMachineId(this.getState()) });
+      const { providers } = await this.api.authProviders({ mode: "login", machineId });
+      if (!this.isCurrentAuthOperation(operationGeneration)) return;
       const exact = providers.filter((provider) => provider.id === providerId);
       if (exact.length === 0) {
         this.setState({ error: `Auth provider not found: ${providerId}` });
         return;
       }
       if (exact.length > 1) {
-        this.setState({ authDialog: { step: "providers", mode: "login", providers: exact } });
+        this.setState({ authDialog: { step: "providers", mode: "login", machineId, providers: exact } });
         return;
       }
       const provider = exact[0];
       if (provider === undefined) return;
-      if (provider.authType === "oauth" || provider.loginFlow === "interactive") await this.startLoginFlow(provider);
+      if (provider.authType === "oauth" || provider.loginFlow === "interactive") await this.startLoginFlow(provider, machineId, operationGeneration);
     } catch (error) {
-      this.setState({ error: String(error) });
+      if (this.isCurrentAuthOperation(operationGeneration)) this.setState({ error: String(error) });
     }
   }
 
-  private async startLoginFlow(provider: AuthProviderOption): Promise<void> {
-    if (this.rejectRemoteOAuth("login", provider)) return;
-    const operationGeneration = ++this.oauthOperationGeneration;
-    this.stopPolling();
+  private async logoutProviderOnMachine(providerId: string, machineId: string, operationGeneration: number): Promise<void> {
+    if (!this.isCurrentAuthOperation(operationGeneration)) return;
     try {
-      const machineId = selectedMachineId(this.getState());
+      await this.api.logoutProvider(providerId, machineId);
+      if (!this.isCurrentAuthOperation(operationGeneration)) return;
+      this.closeDialog();
+      void this.refreshStatus(machineId);
+    } catch (error) {
+      if (this.isCurrentAuthOperation(operationGeneration)) this.setState({ error: String(error) });
+    }
+  }
+
+  private async startLoginFlow(provider: AuthProviderOption, machineId: string, operationGeneration: number): Promise<void> {
+    if (!this.isCurrentAuthOperation(operationGeneration)) return;
+    try {
       const flow = provider.authType === "oauth"
         ? await this.api.startOAuthLogin(provider.id, machineId)
         : await this.api.startInteractiveApiKeyLogin(provider.id, machineId);
-      if (operationGeneration !== this.oauthOperationGeneration) {
+      if (!this.isCurrentAuthOperation(operationGeneration)) {
         // Sessiond has already allocated this flow. Do not orphan its timer,
         // provider polling, or callback listener when the UI operation is stale.
         if (flow.status === "running") {
@@ -190,16 +224,8 @@ export class AuthController {
       this.updateOAuthFlow(flow, machineId);
       if (flow.status === "running") this.startPolling(flow.flowId, machineId);
     } catch (error) {
-      if (operationGeneration === this.oauthOperationGeneration) this.setState({ error: String(error) });
+      if (this.isCurrentAuthOperation(operationGeneration)) this.setState({ error: String(error) });
     }
-  }
-
-  private rejectRemoteOAuth(action: "login" | "logout", provider: AuthProviderOption): boolean {
-    const machine = this.getState().selectedMachine;
-    if (provider.authType !== "oauth" || machine?.kind !== "remote") return false;
-    const where = machine.baseUrl ?? "that remote PI WEB instance";
-    this.setState({ error: `OAuth ${action} for remote machines must be configured directly on ${where}.` });
-    return true;
   }
 
   private updateOAuthFlow(flow: OAuthFlowState, machineId: string): void {
@@ -209,10 +235,7 @@ export class AuthController {
       void this.refreshStatus(machineId);
       return;
     }
-    if (flow.status === "error" || flow.status === "cancelled") {
-      this.oauthOperationGeneration += 1;
-      this.stopPolling();
-    }
+    if (flow.status === "error" || flow.status === "cancelled") this.advanceAuthOperation();
     const existing = this.getState().authDialog;
     const previousInput = existing?.step === "oauth" && existing.flow.flowId === flow.flowId ? existing.inputValue ?? "" : "";
     const previousRequestId = existing?.step === "oauth" ? oauthRequestId(existing.flow) : undefined;
@@ -225,7 +248,7 @@ export class AuthController {
 
   private startPolling(flowId: string, machineId: string): void {
     this.stopPolling();
-    const operationGeneration = this.oauthOperationGeneration;
+    const operationGeneration = this.authOperationGeneration;
     const pollGeneration = this.pollGeneration;
     this.pollTimer = window.setInterval(() => { void this.poll(flowId, machineId, operationGeneration, pollGeneration); }, this.pollIntervalMs);
   }
@@ -258,8 +281,18 @@ export class AuthController {
     }
   }
 
+  private advanceAuthOperation(): number {
+    this.authOperationGeneration += 1;
+    this.stopPolling();
+    return this.authOperationGeneration;
+  }
+
+  private isCurrentAuthOperation(operationGeneration: number): boolean {
+    return operationGeneration === this.authOperationGeneration;
+  }
+
   private currentOAuthDialog(operationGeneration: number, flowId: string): OAuthDialogState | undefined {
-    if (operationGeneration !== this.oauthOperationGeneration) return undefined;
+    if (!this.isCurrentAuthOperation(operationGeneration)) return undefined;
     const dialog = this.getState().authDialog;
     return dialog?.step === "oauth" && dialog.flow.flowId === flowId ? dialog : undefined;
   }
@@ -284,6 +317,10 @@ export class AuthController {
     if (session === undefined || session.archived === true) return undefined;
     return session;
   }
+}
+
+function isSameOAuthResponseTarget(a: OAuthResponseTarget | undefined, b: OAuthResponseTarget): boolean {
+  return a?.flowId === b.flowId && a.requestId === b.requestId;
 }
 
 function oauthRequestId(flow: OAuthFlowState): string | undefined {

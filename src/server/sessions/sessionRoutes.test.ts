@@ -14,12 +14,15 @@ import type {
   SessionBulkMutationRef,
   SessionCleanupExecuteResponse,
   SessionCleanupPreviewResponse,
+  SessionInfo,
   SessionNotificationDismissAllRequest,
   SessionNotificationDismissRequest,
   SessionNotificationInboxSnapshot,
   SessionRef,
   SessionStatus,
   SessionStreamSnapshot,
+  SessionTreeForkRequest,
+  SessionTreeForkResult,
   SessionTreeNavigateRequest,
   SessionUnreadAcknowledgeRequest,
   SessionUnreadCatalogSnapshot,
@@ -336,6 +339,110 @@ describe("session routes", () => {
         expect(response.statusCode).toBe(400);
       }
       expect(routeService.navigateTreeCalls).toEqual([]);
+    } finally {
+      await routeService.dispose();
+      await routeApp.close();
+    }
+  });
+
+  it("strictly parses cwd-scoped session tree fork requests", async () => {
+    const routeApp = Fastify({ logger: false });
+    await routeApp.register(fastifyWebsocket);
+    const eventHub = new SessionEventHub();
+    const routeService = new CapturingRouteSessionService();
+    registerSessionRoutes(routeApp, routeService, eventHub);
+
+    try {
+      const response = await routeApp.inject({
+        method: "POST",
+        url: "/sessions/session-1/tree/fork",
+        payload: { cwd: "/repo/./", entryId: "entry-2", expectedLeafId: "leaf-1" },
+      });
+      const nullLeaf = await routeApp.inject({
+        method: "POST",
+        url: "/sessions/session-1/tree/fork",
+        payload: { cwd: "/repo", entryId: "entry-3", expectedLeafId: null },
+      });
+
+      expect([response.statusCode, nullLeaf.statusCode]).toEqual([200, 200]);
+      expect(response.json()).toEqual({
+        cancelled: false,
+        session: {
+          id: "session-1-fork",
+          cwd: "/workspace",
+          path: "/sessions/session-1-fork.jsonl",
+          created: "2026-01-01T00:00:00.000Z",
+          modified: "2026-01-01T00:01:00.000Z",
+          messageCount: 3,
+          firstMessage: "",
+        },
+        promptDraft: "draft this",
+      });
+      expect(routeService.forkFromTreeCalls).toEqual([
+        {
+          lookup: { id: "session-1", cwd: resolve("/repo") },
+          request: { entryId: "entry-2", expectedLeafId: "leaf-1" },
+        },
+        {
+          lookup: { id: "session-1", cwd: resolve("/repo") },
+          request: { entryId: "entry-3", expectedLeafId: null },
+        },
+      ]);
+    } finally {
+      await routeService.dispose();
+      await routeApp.close();
+    }
+  });
+
+  it("rejects malformed session tree fork requests before calling the service", async () => {
+    const routeApp = Fastify({ logger: false });
+    await routeApp.register(fastifyWebsocket);
+    const eventHub = new SessionEventHub();
+    const routeService = new CapturingRouteSessionService();
+    registerSessionRoutes(routeApp, routeService, eventHub);
+    const base = { cwd: "/repo", entryId: "entry-2", expectedLeafId: "leaf-1" };
+    const malformed: Record<string, unknown>[] = [
+      { cwd: "/repo", expectedLeafId: "leaf-1" },
+      { ...base, entryId: "   " },
+      { ...base, entryId: 42 },
+      { cwd: "/repo", entryId: "entry-2" },
+      { ...base, expectedLeafId: 1 },
+      { ...base, expectedLeafId: "" },
+    ];
+
+    try {
+      for (const payload of malformed) {
+        const response = await routeApp.inject({ method: "POST", url: "/sessions/session-1/tree/fork", payload });
+        expect(response.statusCode).toBe(400);
+      }
+      const missingBody = await routeApp.inject({ method: "POST", url: "/sessions/session-1/tree/fork" });
+      expect(missingBody.statusCode).toBe(400);
+      expect(routeService.forkFromTreeCalls).toEqual([]);
+    } finally {
+      await routeService.dispose();
+      await routeApp.close();
+    }
+  });
+
+  it("maps session tree fork service errors to status codes", async () => {
+    const routeApp = Fastify({ logger: false });
+    await routeApp.register(fastifyWebsocket);
+    const eventHub = new SessionEventHub();
+    const routeService = new CapturingRouteSessionService();
+    registerSessionRoutes(routeApp, routeService, eventHub);
+    const payload = { cwd: "/repo", entryId: "entry-2", expectedLeafId: "leaf-1" };
+
+    try {
+      routeService.forkFromTreeError = new Error("Session not found");
+      const missing = await routeApp.inject({ method: "POST", url: "/sessions/session-1/tree/fork", payload });
+      expect(missing.statusCode).toBe(404);
+      expect(missing.json()).toEqual({ error: "Session not found" });
+
+      routeService.forkFromTreeError = new Error("Stop current session activity before forking the session tree");
+      const active = await routeApp.inject({ method: "POST", url: "/sessions/session-1/tree/fork", payload });
+      expect(active.statusCode).toBe(400);
+      expect(active.json()).toEqual({ error: "Stop current session activity before forking the session tree" });
+      expect(routeService.forkFromTreeCalls).toEqual([]);
     } finally {
       await routeService.dispose();
       await routeApp.close();
@@ -932,6 +1039,8 @@ class CapturingRouteSessionService implements SessionRouteService {
   readonly bulkArchiveCalls: SessionBulkMutationRef[][] = [];
   readonly bulkDeleteCalls: SessionBulkMutationRef[][] = [];
   readonly navigateTreeCalls: { lookup: SessionRouteRef; request: SessionTreeNavigateRequest }[] = [];
+  readonly forkFromTreeCalls: { lookup: SessionRouteRef; request: SessionTreeForkRequest }[] = [];
+  forkFromTreeError: Error | undefined;
   readonly submitAskCalls: { lookup: SessionRouteRef; askId: string; submission: AskUserSubmission }[] = [];
   readonly cancelAskCalls: { lookup: SessionRouteRef; askId: string }[] = [];
   readonly answerDialogCalls: { lookup: SessionRouteRef; dialogId: string; value: ExtensionDialogAnswer }[] = [];
@@ -1117,6 +1226,23 @@ class CapturingRouteSessionService implements SessionRouteService {
     this.navigateTreeCalls.push({ lookup, request });
     return Promise.resolve({ cancelled: false, editorText: "edit this" });
   }
+  forkFromTree(lookup: SessionRouteRef, request: SessionTreeForkRequest): Promise<SessionTreeForkResult> {
+    if (this.forkFromTreeError !== undefined) return Promise.reject(this.forkFromTreeError);
+    this.forkFromTreeCalls.push({ lookup, request });
+    return Promise.resolve({
+      cancelled: false,
+      session: {
+        id: "session-1-fork",
+        cwd: "/workspace",
+        path: "/sessions/session-1-fork.jsonl",
+        created: "2026-01-01T00:00:00.000Z",
+        modified: "2026-01-01T00:01:00.000Z",
+        messageCount: 3,
+        firstMessage: "",
+      } satisfies SessionInfo,
+      promptDraft: "draft this",
+    });
+  }
   abort(): never { throw unusedRouteMethod("abort"); }
   stop(): never { throw unusedRouteMethod("stop"); }
   archive(): never { throw unusedRouteMethod("archive"); }
@@ -1142,6 +1268,14 @@ class RejectingSessionManager implements PiSessionManagerGateway {
   listAll() {
     this.calls.listAll += 1;
     return Promise.resolve([]);
+  }
+
+  resolveSessionFile() {
+    return Promise.resolve(undefined);
+  }
+
+  invalidateSessionFile() {
+    /* no memo to drop in this fake */
   }
 
   open(): never {

@@ -1,16 +1,21 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it } from "vitest";
-import type { Project, WorkspaceActivity } from "../api";
+import type { Project } from "../api";
+import type { MachineStatusSnapshot } from "../../../shared/machineStatus";
+import { machineStatusSnapshot } from "../machineStatus.testSupport";
 import { ProjectList } from "./ProjectList";
 
 afterEach(() => {
   document.body.replaceChildren();
 });
 
-describe("project unread indicator", () => {
-  it("shows an unread dot only on projects tracked as unread", async () => {
-    const list = await mountProjectList([project("project-a"), project("project-b")], new Set(["project-b"]));
+describe("project status indicator", () => {
+  it("shows an unread dot only on projects the snapshot reports as unread", async () => {
+    const list = await mountProjectList(
+      [project("project-a"), project("project-b")],
+      machineStatusSnapshot({ projects: { "project-b": { "core:unread": true } } }),
+    );
 
     expect(unreadDot(rowFor(list, "project-a"))).toBeNull();
     const dot = unreadDot(rowFor(list, "project-b"));
@@ -18,20 +23,21 @@ describe("project unread indicator", () => {
     expect(dot?.getAttribute("title")).toBe("Unread sessions in this project");
   });
 
-  it("clears the dot once the project is no longer tracked as unread", async () => {
-    const list = await mountProjectList([project("project-a")], new Set(["project-a"]));
+  it("clears the dot once a newer snapshot reports nothing unread", async () => {
+    const list = await mountProjectList([project("project-a")], machineStatusSnapshot({ projects: { "project-a": { "core:unread": true } } }));
     expect(list.shadowRoot?.querySelector(".activity-indicator.unread")).not.toBeNull();
 
-    list.unreadProjectIds = new Set();
+    list.statusSnapshot = machineStatusSnapshot({ revision: 2 });
     await list.updateComplete;
 
     expect(list.shadowRoot?.querySelector(".activity-indicator.unread")).toBeNull();
   });
 
   it("wraps the work dot in an unread ring when the project is busy and unread", async () => {
-    const list = await mountProjectList([project("project-a")], new Set(["project-a"]));
-    list.activities = { "/repo/project-a": workspaceActivity("/repo/project-a", true, false) };
-    await list.updateComplete;
+    const list = await mountProjectList(
+      [project("project-a")],
+      machineStatusSnapshot({ projects: { "project-a": { "core:working": true, "core:unread": true } } }),
+    );
 
     const row = rowFor(list, "project-a");
     const ring = row.querySelector(".unread-ring");
@@ -39,12 +45,38 @@ describe("project unread indicator", () => {
     expect(ring?.getAttribute("title")).toBe("Unread sessions in this project · Project active");
     expect(row.querySelector(".activity-indicator.unread")).toBeNull();
   });
+
+  it("lights a project whose workspaces have never been opened, for work and for unread", async () => {
+    // The row reads the server-attributed snapshot, so it no longer depends on
+    // the browser having loaded that project's workspaces.
+    const list = await mountProjectList(
+      [project("unvisited-work"), project("unvisited-unread")],
+      machineStatusSnapshot({
+        projects: { "unvisited-work": { "core:working": true }, "unvisited-unread": { "core:unread": true } },
+      }),
+    );
+
+    expect(rowFor(list, "unvisited-work").querySelector(".activity-indicator.session")).not.toBeNull();
+    expect(unreadDot(rowFor(list, "unvisited-unread"))).not.toBeNull();
+  });
+
+  it("shows no indicator when the machine publishes no snapshot", async () => {
+    const list = await mountProjectList([project("project-a")], undefined);
+
+    expect(rowFor(list, "project-a").querySelector(".activity-indicator")).toBeNull();
+  });
+
+  it("still lights a row from a flag id this build does not know", async () => {
+    const list = await mountProjectList([project("project-a")], machineStatusSnapshot({ projects: { "project-a": { "core:future": true } } }));
+
+    expect(rowFor(list, "project-a").querySelector(".activity-indicator.session")).not.toBeNull();
+  });
 });
 
-async function mountProjectList(projects: Project[], unreadProjectIds: ReadonlySet<string>): Promise<ProjectList> {
+async function mountProjectList(projects: Project[], statusSnapshot: MachineStatusSnapshot | undefined): Promise<ProjectList> {
   const list = new ProjectList();
   list.projects = projects;
-  list.unreadProjectIds = unreadProjectIds;
+  list.statusSnapshot = statusSnapshot;
   document.body.append(list);
   await list.updateComplete;
   return list;
@@ -59,10 +91,6 @@ function rowFor(list: ProjectList, projectName: string): Element {
 
 function unreadDot(row: Element): Element | null {
   return row.querySelector(".activity-indicator.unread");
-}
-
-function workspaceActivity(cwd: string, hasSessionActivity: boolean, hasTerminalActivity: boolean): WorkspaceActivity {
-  return { cwd, hasSessionActivity, hasTerminalActivity, updatedAt: "2026-06-04T00:00:00.000Z" };
 }
 
 function project(id: string): Project {

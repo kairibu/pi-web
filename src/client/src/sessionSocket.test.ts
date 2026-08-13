@@ -190,8 +190,16 @@ function terminalInfoWire() {
   return { id: "terminal-1", cwd: "/repo", name: "bash", createdAt: "2026-07-20T00:00:00.000Z", exited: false };
 }
 
-function workspaceActivityWire() {
-  return { cwd: "/repo", hasSessionActivity: true, hasTerminalActivity: false, updatedAt: "2026-07-20T00:00:00.000Z" };
+function machineStatusWire() {
+  return {
+    epochId: "epoch-1",
+    revision: 3,
+    machine: { "core:working": true },
+    projects: { "project-1": { "core:working": true } },
+    workspaces: { "workspace-1": { "core:working": true } },
+    unattributed: {},
+    generatedAt: "2026-07-20T00:00:00.000Z",
+  };
 }
 
 describe("socket stream validation", () => {
@@ -268,9 +276,21 @@ describe("socket stream validation", () => {
       { type: "terminal.created", terminal: terminalInfoWire() },
       { type: "terminal.exited", terminal: { ...terminalInfoWire(), exited: true, exitCode: 0 } },
       { type: "terminal.closed", terminalId: "terminal-1", cwd: "/repo" },
-      { type: "workspace.activity", activity: workspaceActivityWire() },
+      { type: "machine.status", status: machineStatusWire() },
     ];
     for (const frame of validFrames) expect(parseRealtimeSocketEvent(frame)).toEqual(frame);
+  });
+
+  it("keeps unrecognised status flags so a newer daemon's tree still arrives", () => {
+    // A federated machine may run a daemon that publishes flags this browser
+    // does not know; the frame must survive and still carry them.
+    expect(parseRealtimeSocketEvent({
+      type: "machine.status",
+      status: { ...machineStatusWire(), machine: { "core:working": true, "core:future": true, "core:broken": "yes" } },
+    })).toEqual({
+      type: "machine.status",
+      status: { ...machineStatusWire(), machine: { "core:working": true, "core:future": true } },
+    });
   });
 
   it("drops malformed realtime frames instead of accepting them on type alone", () => {
@@ -282,7 +302,8 @@ describe("socket stream validation", () => {
     expect(parseRealtimeSocketEvent({ type: "terminal.exited", terminal: null })).toBeUndefined();
     expect(parseRealtimeSocketEvent({ type: "terminal.closed", terminalId: "terminal-1" })).toBeUndefined();
     expect(parseRealtimeSocketEvent({ type: "terminal.closed", terminalId: "", cwd: "/repo" })).toBeUndefined();
-    expect(parseRealtimeSocketEvent({ type: "workspace.activity", activity: { cwd: "/repo" } })).toBeUndefined();
+    expect(parseRealtimeSocketEvent({ type: "machine.status", status: { ...machineStatusWire(), epochId: "" } })).toBeUndefined();
+    expect(parseRealtimeSocketEvent({ type: "machine.status", status: { ...machineStatusWire(), projects: null } })).toBeUndefined();
     // Per-session stream frames are not accepted on the global socket.
     expect(parseRealtimeSocketEvent({ type: "assistant.delta", text: "hi" })).toBeUndefined();
     expect(parseRealtimeSocketEvent({ type: "future.notification", payload: {} })).toBeUndefined();
@@ -358,15 +379,7 @@ describe("socket instance isolation", () => {
     const socket = new RealtimeSocket();
     const oldHandler = vi.fn();
     const newHandler = vi.fn();
-    const event = {
-      type: "workspace.activity",
-      activity: {
-        cwd: "/repo",
-        hasSessionActivity: true,
-        hasTerminalActivity: false,
-        updatedAt: "2026-07-18T00:00:00.000Z",
-      },
-    };
+    const event = { type: "machine.status", status: machineStatusWire() };
     socket.connect(oldHandler, undefined, "machine-a");
     const oldSocket = FakeWebSocket.instances[0];
     if (oldSocket === undefined) throw new Error("expected old realtime socket");

@@ -14,29 +14,33 @@ describe("PiWebApp workspace topology refresh wiring", () => {
     const app = createApp();
     stubBackgroundRefreshes(app);
     const refreshTopology = spyOnTopologyRefresh(app);
+    const refreshSurface = replaceRefresh(app, "refreshCurrentWorkspaceSurface");
 
     await browserResumeRefresh(app)();
 
     expect(refreshTopology).toHaveBeenCalledOnce();
+    expect(refreshSurface).toHaveBeenCalledOnce();
   });
 
   it("re-lists the selected project's workspaces on the plugin-facing app-data refresh", async () => {
     const app = createApp();
     stubBackgroundRefreshes(app);
     const refreshTopology = spyOnTopologyRefresh(app);
+    const refreshSurface = replaceRefresh(app, "refreshCurrentWorkspaceSurface");
 
     await refreshAppData(app);
 
     expect(refreshTopology).toHaveBeenCalledOnce();
+    expect(refreshSurface).toHaveBeenCalledOnce();
   });
 
   it("still re-lists workspaces when a sibling refresh in the same resume batch fails", async () => {
     const app = createApp();
     stubBackgroundRefreshes(app);
-    failBackgroundRefresh(app, "refreshMachineActivities", new Error("machine activity unavailable"));
+    failBackgroundRefresh(app, "refreshMachineStatusSnapshots", new Error("machine status unavailable"));
     const refreshTopology = spyOnTopologyRefresh(app);
 
-    await expect(browserResumeRefresh(app)()).rejects.toThrow("machine activity unavailable");
+    await expect(browserResumeRefresh(app)()).rejects.toThrow("machine status unavailable");
     expect(refreshTopology).toHaveBeenCalledOnce();
   });
 });
@@ -58,7 +62,7 @@ function createApp(): PiWebApp {
 function stubBackgroundRefreshes(app: PiWebApp): void {
   const result = () => Promise.resolve();
   for (const name of [
-    "refreshMachineActivities",
+    "refreshMachineStatusSnapshots",
     "refreshWorkspaceDeletionRuns",
     "loadClientConfig",
     "refreshCurrentWorkspaceSurface",
@@ -74,6 +78,12 @@ function stubBackgroundRefreshes(app: PiWebApp): void {
 
 function failBackgroundRefresh(app: PiWebApp, name: string, error: Error): void {
   if (!Reflect.set(app, name, () => Promise.reject(error))) throw new Error(`Could not fail PiWebApp.${name}`);
+}
+
+function replaceRefresh(app: PiWebApp, name: string) {
+  const refresh = vi.fn<RefreshCallback>(() => Promise.resolve());
+  if (!Reflect.set(app, name, refresh)) throw new Error(`Could not replace PiWebApp.${name}`);
+  return refresh;
 }
 
 function spyOnTopologyRefresh(app: PiWebApp) {

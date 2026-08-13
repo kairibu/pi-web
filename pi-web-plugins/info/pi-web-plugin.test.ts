@@ -20,10 +20,12 @@ describe("Info plugin copy-diagnostics action", () => {
           projectId: "proj-1",
           path: "/srv/dev/pi-web",
           label: "pi-web",
-          branch: "main",
           isMain: true,
-          isGitRepo: true,
-          isGitWorktree: false,
+          provider: {
+            pluginId: "git",
+            capabilities: { request: true, remove: true },
+            metadata: { branch: "main" },
+          },
         },
       },
     });
@@ -35,12 +37,12 @@ describe("Info plugin copy-diagnostics action", () => {
     expect(summary).toContain("PI WEB diagnostics");
     expect(summary).toContain("Status: unavailable");
     expect(summary).toContain("Machine: devbox (local machine)");
-    expect(summary).toContain("Workspace: pi-web — /srv/dev/pi-web (branch main, git repo, main workspace)");
+    expect(summary).toContain("Workspace: pi-web — /srv/dev/pi-web (provider: git, main workspace)");
   });
 });
 
 function findCopyDiagnosticsAction() {
-  const action = plugin.activate({ apiVersion: 1, pluginId: "info", html, svg }).contributions.actions?.find((candidate) => candidate.id === "copy-diagnostics");
+  const action = plugin.activate({ apiVersion: 2, pluginId: "info", runtimePluginId: "info", html, svg }).contributions.actions?.find((candidate) => candidate.id === "copy-diagnostics");
   if (action === undefined) throw new Error("Expected copy-diagnostics action");
   return action;
 }
@@ -60,7 +62,7 @@ function runtimeContext(patch: Partial<PluginRuntimeContext> = {}): PluginRuntim
     selectWorkspaceTool: noop,
     openTerminal: noop,
     refreshFiles: noop,
-    refreshGit: noop,
+    refreshWorkspacePanels: noop,
     refreshAppData: noop,
     reloadPage: noop,
     startSession: noop,

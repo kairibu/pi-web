@@ -61,6 +61,11 @@ export interface SessionCommandNaming {
   listSessionNames?: (cwd: string) => Promise<readonly string[]>;
 }
 
+export interface ForkEntryOptions {
+  /** Rechecked inside the serialized replacement boundary when supplied by /tree. */
+  expectedLeafId: string | null;
+}
+
 type RelatedSessionKind = "fork" | "copy";
 
 interface PendingCommandSelect {
@@ -114,7 +119,17 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
     const pending = this.pendingSelects.get(requestId);
     if (pending?.sessionId !== sessionId) return { type: "unsupported", message: "Command request expired" };
     this.pendingSelects.delete(requestId);
+    return this.forkEntry(sessionId, value);
+  }
 
+  /**
+   * Forks the session from a specific tree entry into a new session file, leaving
+   * the original session untouched. Shared by the `/fork` select response and the
+   * session-tree fork-from-entry path. User entries fork from "before" so their
+   * text returns as a prompt draft; every other entry forks "at" so the forked
+   * file includes it.
+   */
+  async forkEntry(sessionId: string, entryId: string, options?: ForkEntryOptions): Promise<ClientCommandResult> {
     const active = await this.getActive(sessionId);
     if (this.lifecycle.isTreeNavigationActive?.(active.runtime.session) === true) return treeNavigationActiveUnsupported();
     if (this.hasActiveWork(active.runtime.session)) return forkActiveUnsupported("fork");
@@ -122,7 +137,14 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
     if (this.lifecycle.isTreeNavigationActive?.(active.runtime.session) === true) return treeNavigationActiveUnsupported();
     if (this.hasActiveWork(active.runtime.session)) return forkActiveUnsupported("fork");
     const result = await this.runSessionReplacement(active.runtime, async () => {
-      const forkResult = await active.runtime.fork(value);
+      const session = active.runtime.session;
+      if (options !== undefined && session.sessionManager.getLeafId() !== options.expectedLeafId) {
+        throw new Error("The session changed since /tree was opened. Reopen /tree and try again.");
+      }
+      // Resolve the entry kind from the session state protected by the same
+      // replacement boundary as the fork, not Pi's text-only /fork selector.
+      const position = this.forkPosition(session, entryId);
+      const forkResult = await active.runtime.fork(entryId, { position });
       if (!forkResult.cancelled) this.tryNameRelatedSession(active.runtime.session, relatedName);
       return forkResult;
     });
@@ -223,6 +245,12 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
 
   private hasActiveWork(session: TSession): boolean {
     return sessionHasActiveWork(session) || this.lifecycle.hasActiveWork?.(session) === true;
+  }
+
+  private forkPosition(session: TSession, entryId: string): "before" | "at" {
+    const treeNode = this.lifecycle.getSessionTree?.(session)?.nodes.find((node) => node.id === entryId);
+    if (treeNode !== undefined) return treeNode.kind === "user" ? "before" : "at";
+    return session.getUserMessagesForForking().some((message) => message.entryId === entryId) ? "before" : "at";
   }
 
   private runSessionReplacement<T>(runtime: CommandRuntime<TSession>, operation: () => Promise<T>): Promise<T> {

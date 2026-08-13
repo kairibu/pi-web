@@ -247,6 +247,38 @@ describe("SessionEventHub", () => {
     expect(s2.send).toHaveBeenCalledWith(JSON.stringify({ type: "assistant.delta", text: "x", seq: 1 }));
   });
 
+  it("hands the join frame to each global subscriber as it joins, and to no one else", () => {
+    const hub = new SessionEventHub();
+    const early = new FakeSocket();
+    hub.addGlobal(early);
+    const frame = { type: "session.name", sessionId: "s1", name: "Joined" } as const;
+    hub.setGlobalJoinFrame(() => frame);
+    const late = new FakeSocket();
+    const sessionSocket = new FakeSocket();
+
+    hub.addGlobal(late);
+    hub.add("s1", sessionSocket);
+
+    expect(late.send).toHaveBeenCalledWith(JSON.stringify(frame));
+    // The frame belongs to the joining socket only: an already-connected
+    // subscriber has the state and a per-session socket never carries it.
+    expect(early.send).not.toHaveBeenCalled();
+    expect(sessionSocket.send).not.toHaveBeenCalled();
+  });
+
+  it("drops a global socket that fails on its join frame", () => {
+    const hub = new SessionEventHub();
+    const failed = new FakeSocket();
+    failed.send.mockImplementation(() => { throw new Error("socket closed"); });
+    hub.setGlobalJoinFrame(() => ({ type: "session.name", sessionId: "s1", name: "Joined" }));
+
+    hub.addGlobal(failed);
+    hub.publishGlobal({ type: "session.name", sessionId: "s1", name: "Renamed" });
+
+    expect(failed.terminate).toHaveBeenCalledOnce();
+    expect(failed.send).toHaveBeenCalledOnce();
+  });
+
   it("reports zero seq for a session that has never published", () => {
     const hub = new SessionEventHub();
     expect(hub.currentSeq("never")).toBe(0);

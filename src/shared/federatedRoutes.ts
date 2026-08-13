@@ -1,12 +1,34 @@
+import {
+  PLUGIN_BACKEND_FEDERATION_TIMEOUT_MS,
+  PLUGIN_BACKEND_REQUEST_BODY_MAX_BYTES,
+  PLUGIN_BACKEND_RESPONSE_BODY_MAX_BYTES,
+} from "./pluginBackendProtocol.js";
+import { WORKSPACE_REMOVAL_FEDERATION_TIMEOUT_MS } from "./workspaceRemovalProtocol.js";
+import { MAX_INLINE_PREVIEW_BYTES } from "./workspaceFiles.js";
+
+export { PLUGIN_BACKEND_FEDERATION_TIMEOUT_MS } from "./pluginBackendProtocol.js";
+export { WORKSPACE_REMOVAL_FEDERATION_TIMEOUT_MS } from "./workspaceRemovalProtocol.js";
+
 export type FederatedHttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 
 export const PI_PACKAGE_MUTATION_PROXY_TIMEOUT_MS = 5 * 60_000;
 export const SESSION_TREE_NAVIGATION_PROXY_TIMEOUT_MS = 5 * 60_000;
+export const SESSION_TREE_FORK_PROXY_TIMEOUT_MS = 5 * 60_000;
+export const WORKSPACE_FILE_PREVIEW_ROUTE_PATH = "/projects/:projectId/workspaces/:workspaceId/file/preview";
 
 export interface FederatedHttpRouteSpec {
   method: FederatedHttpMethod;
   path: string;
   timeoutMs?: number;
+  bodyLimit?: number;
+  /**
+   * Bound the proxied response body. The workspace file preview route applies
+   * it to inline previews only, because attachment downloads are intentionally
+   * uncapped on both the local and remote paths.
+   */
+  responseBodyLimit?: number;
+  /** Propagate an inbound disconnect through the remote request. */
+  propagateCancellation?: boolean;
 }
 
 export const FEDERATED_HTTP_ROUTES = [
@@ -23,16 +45,31 @@ export const FEDERATED_HTTP_ROUTES = [
   { method: "DELETE", path: "/projects/:projectId" },
   { method: "GET", path: "/project-directories" },
   { method: "GET", path: "/projects/:projectId/workspaces" },
-  { method: "DELETE", path: "/projects/:projectId/workspaces/:workspaceId" },
+  {
+    method: "POST",
+    path: "/plugin-backends/:pluginId/projects/:projectId/workspaces/:workspaceId/:operation",
+    timeoutMs: PLUGIN_BACKEND_FEDERATION_TIMEOUT_MS,
+    bodyLimit: PLUGIN_BACKEND_REQUEST_BODY_MAX_BYTES,
+    responseBodyLimit: PLUGIN_BACKEND_RESPONSE_BODY_MAX_BYTES,
+  },
+  {
+    method: "DELETE",
+    path: "/projects/:projectId/workspaces/:workspaceId",
+    timeoutMs: WORKSPACE_REMOVAL_FEDERATION_TIMEOUT_MS,
+    propagateCancellation: true,
+  },
   { method: "GET", path: "/projects/:projectId/workspaces/:workspaceId/tree" },
   { method: "GET", path: "/projects/:projectId/workspaces/:workspaceId/file" },
   { method: "PUT", path: "/projects/:projectId/workspaces/:workspaceId/file" },
   { method: "DELETE", path: "/projects/:projectId/workspaces/:workspaceId/file" },
   { method: "POST", path: "/projects/:projectId/workspaces/:workspaceId/file/move" },
-  { method: "GET", path: "/projects/:projectId/workspaces/:workspaceId/file/preview" },
+  {
+    method: "GET",
+    path: WORKSPACE_FILE_PREVIEW_ROUTE_PATH,
+    responseBodyLimit: MAX_INLINE_PREVIEW_BYTES,
+    propagateCancellation: true,
+  },
   { method: "GET", path: "/projects/:projectId/workspaces/:workspaceId/files" },
-  { method: "GET", path: "/projects/:projectId/workspaces/:workspaceId/git/status" },
-  { method: "GET", path: "/projects/:projectId/workspaces/:workspaceId/git/diff" },
   { method: "GET", path: "/projects/:projectId/workspaces/:workspaceId/terminals" },
   { method: "POST", path: "/projects/:projectId/workspaces/:workspaceId/terminals" },
   { method: "DELETE", path: "/projects/:projectId/workspaces/:workspaceId/terminals" },
@@ -42,7 +79,7 @@ export const FEDERATED_HTTP_ROUTES = [
   { method: "GET", path: "/terminal-command-runs" },
   { method: "GET", path: "/terminal-command-runs/:runId" },
   { method: "POST", path: "/terminal-command-runs/:runId/cancel" },
-  { method: "GET", path: "/activity" },
+  { method: "GET", path: "/status" },
   { method: "GET", path: "/sessions" },
   { method: "POST", path: "/sessions" },
   { method: "GET", path: "/sessions/unread" },
@@ -77,6 +114,7 @@ export const FEDERATED_HTTP_ROUTES = [
   { method: "POST", path: "/sessions/:sessionId/commands/run" },
   { method: "POST", path: "/sessions/:sessionId/commands/respond" },
   { method: "POST", path: "/sessions/:sessionId/tree/navigate", timeoutMs: SESSION_TREE_NAVIGATION_PROXY_TIMEOUT_MS },
+  { method: "POST", path: "/sessions/:sessionId/tree/fork", timeoutMs: SESSION_TREE_FORK_PROXY_TIMEOUT_MS },
   { method: "POST", path: "/sessions/:sessionId/abort" },
   { method: "POST", path: "/sessions/:sessionId/stop" },
   { method: "POST", path: "/sessions/:sessionId/archive" },

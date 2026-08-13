@@ -2,7 +2,8 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import type { Machine, Project, Workspace } from "../../api";
-import type { UnreadPresence } from "../../unreadPresence";
+import type { MachineStatusSnapshot } from "../../../../shared/machineStatus";
+import { machineStatusSnapshot } from "../../machineStatus.testSupport";
 import { MachineList } from "../MachineList";
 import { MachineSwitcher } from "../MachineSwitcher";
 import { ProjectList } from "../ProjectList";
@@ -24,38 +25,56 @@ describe("shouldShowMachinesSection", () => {
   });
 });
 
-describe("unread presence wiring", () => {
-  it("feeds each unread presence slice to the matching navigation section", async () => {
-    const unreadPresence: UnreadPresence = {
-      machines: new Set(["remote-a"]),
-      projects: new Set(["project-1"]),
-      workspaces: new Set(["ws-1"]),
-    };
-    const panel = new AppNavigationPanel();
-    panel.compact = true;
-    panel.machines = [machine("local"), machine("remote-a")];
-    panel.selectedMachine = machine("local");
-    panel.projects = [project("project-1")];
-    panel.workspaces = [workspace("ws-1", "project-1")];
-    panel.unreadPresence = unreadPresence;
-    document.body.append(panel);
-    await panel.updateComplete;
+describe("machine status wiring", () => {
+  it("gives machine sections every snapshot and project and workspace sections the selected machine's", async () => {
+    const local = machineStatusSnapshot({ machine: { "core:working": true } });
+    const remote = machineStatusSnapshot({ machine: { "core:unread": true } });
+    const panel = await mountPanel({ local, "remote-a": remote }, machine("local"));
 
-    const switcher = panel.shadowRoot?.querySelector("machine-switcher");
-    const machineList = panel.shadowRoot?.querySelector("machine-list");
-    const projectList = panel.shadowRoot?.querySelector("project-list");
-    const workspaceList = panel.shadowRoot?.querySelector("workspace-list");
-    if (!(switcher instanceof MachineSwitcher)) throw new Error("Expected machine-switcher section");
-    if (!(machineList instanceof MachineList)) throw new Error("Expected machine-list section");
-    if (!(projectList instanceof ProjectList)) throw new Error("Expected project-list section");
-    if (!(workspaceList instanceof WorkspaceList)) throw new Error("Expected workspace-list section");
+    expect(section(panel, "machine-switcher", MachineSwitcher).statusSnapshots).toEqual({ local, "remote-a": remote });
+    expect(section(panel, "machine-list", MachineList).statusSnapshots).toEqual({ local, "remote-a": remote });
+    expect(section(panel, "project-list", ProjectList).statusSnapshot).toBe(local);
+    expect(section(panel, "workspace-list", WorkspaceList).statusSnapshot).toBe(local);
+  });
 
-    expect(switcher.unreadMachineIds).toBe(unreadPresence.machines);
-    expect(machineList.unreadMachineIds).toBe(unreadPresence.machines);
-    expect(projectList.unreadProjectIds).toBe(unreadPresence.projects);
-    expect(workspaceList.unreadWorkspaceIds).toBe(unreadPresence.workspaces);
+  it("reads the local machine's snapshot before a machine has been selected", async () => {
+    // `selectedMachine` is undefined until machines load, and can stay undefined
+    // if that load fails, while local project rows already render. The app keys
+    // snapshots by `selectedMachine?.id ?? LOCAL_MACHINE_ID`, so this panel must
+    // resolve the same id instead of blanking every indicator.
+    const local = machineStatusSnapshot({ projects: { "project-1": { "core:working": true } } });
+    const panel = await mountPanel({ local }, undefined);
+
+    expect(section(panel, "project-list", ProjectList).statusSnapshot).toBe(local);
+    expect(section(panel, "workspace-list", WorkspaceList).statusSnapshot).toBe(local);
+  });
+
+  it("leaves project and workspace sections without a snapshot when the selected machine has none", async () => {
+    const panel = await mountPanel({ "remote-a": machineStatusSnapshot() }, machine("local"));
+
+    expect(section(panel, "project-list", ProjectList).statusSnapshot).toBeUndefined();
+    expect(section(panel, "workspace-list", WorkspaceList).statusSnapshot).toBeUndefined();
   });
 });
+
+async function mountPanel(machineStatusSnapshots: Record<string, MachineStatusSnapshot>, selectedMachine: Machine | undefined): Promise<AppNavigationPanel> {
+  const panel = new AppNavigationPanel();
+  panel.compact = true;
+  panel.machines = [machine("local"), machine("remote-a")];
+  if (selectedMachine !== undefined) panel.selectedMachine = selectedMachine;
+  panel.projects = [project("project-1")];
+  panel.workspaces = [workspace("ws-1", "project-1")];
+  panel.machineStatusSnapshots = machineStatusSnapshots;
+  document.body.append(panel);
+  await panel.updateComplete;
+  return panel;
+}
+
+function section<T>(panel: AppNavigationPanel, selector: string, type: abstract new (...args: never) => T): T {
+  const element = panel.shadowRoot?.querySelector(selector);
+  if (!(element instanceof type)) throw new Error(`Expected a ${selector} section`);
+  return element;
+}
 
 function machine(id: string): Machine {
   return {
@@ -72,5 +91,5 @@ function project(id: string): Project {
 }
 
 function workspace(id: string, projectId: string): Workspace {
-  return { id, projectId, path: `/repo/${id}`, label: id, isMain: true, isGitRepo: true, isGitWorktree: false, effectiveConfig: {} };
+  return { id, projectId, path: `/repo/${id}`, label: id, isMain: true, effectiveConfig: {} };
 }

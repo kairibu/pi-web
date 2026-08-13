@@ -1,13 +1,87 @@
-export type MachineKind = "local" | "remote";
+import type { MachineStatusUiEvent } from "./machineStatus.js";
+import type {
+  DeleteWorkspaceFileResponse,
+  FileContentMediaType,
+  FileContentResponse,
+  FileTreeEntry,
+  FileTreeResponse,
+  JsonObject,
+  JsonPrimitive,
+  JsonValue,
+  MachineKind,
+  MoveWorkspaceFileOptions,
+  MoveWorkspaceFileResponse,
+  PiWebComponentStatus,
+  PiWebDockerMode,
+  PiWebInstallationInfo,
+  PiWebInstallationKind,
+  PiWebReleaseStatus,
+  PiWebServiceComponent,
+  PiWebStatusMessage,
+  PiWebStatusResponse,
+  PiWebStatusSeverity,
+  PiWebVersionResponse,
+  TerminalCommandRun,
+  TerminalCommandRunHandle,
+  TerminalCommandRunStatus,
+  WorkspaceProviderCapabilities,
+  WorkspaceProviderMetadata,
+  WorkspaceRemovalPresentation,
+  WriteWorkspaceFileOptions,
+  WriteWorkspaceFileResponse,
+} from "./pluginApiTypes.js";
+
+export type {
+  DeleteWorkspaceFileResponse,
+  FileContentMediaType,
+  FileContentResponse,
+  FileTreeEntry,
+  FileTreeResponse,
+  JsonObject,
+  JsonPrimitive,
+  JsonValue,
+  MachineKind,
+  MoveWorkspaceFileOptions,
+  MoveWorkspaceFileResponse,
+  PiWebComponentStatus,
+  PiWebDockerMode,
+  PiWebInstallationInfo,
+  PiWebInstallationKind,
+  PiWebReleaseStatus,
+  PiWebServiceComponent,
+  PiWebStatusMessage,
+  PiWebStatusResponse,
+  PiWebStatusSeverity,
+  PiWebVersionResponse,
+  TerminalCommandRun,
+  TerminalCommandRunHandle,
+  TerminalCommandRunStatus,
+  WorkspaceProviderCapabilities,
+  WorkspaceProviderMetadata,
+  WorkspaceRemovalPresentation,
+  WriteWorkspaceFileOptions,
+  WriteWorkspaceFileResponse,
+};
+
+/** Internal query shape for PI WEB's terminal-command-runs host protocol. */
+export interface TerminalCommandRunFilter {
+  projectId?: string;
+  workspaceId?: string;
+  terminalId?: string;
+  statuses?: TerminalCommandRunStatus[];
+  metadata?: Record<string, string>;
+}
+
 export type MachineStatus = "unknown" | "online" | "offline" | "error";
 
 /**
- * Registry of feature-gating capabilities. Currently empty: every component is
- * expected to run the current version, so no capability is advertised. Add an
- * entry here (plus the runtime/requirements entries in `capabilities.ts`) when
- * a future feature needs rolling-version gating again.
+ * Registry of feature-gating capabilities. Add an entry here (plus the
+ * runtime/requirements entries in `capabilities.ts`) when a feature needs
+ * rolling-version gating.
  */
-export const PI_WEB_CAPABILITIES = {} as const;
+export const PI_WEB_CAPABILITIES = {
+  pluginLifecycle: "plugins.lifecycle",
+} as const;
 
 export type PiWebCapability = typeof PI_WEB_CAPABILITIES[keyof typeof PI_WEB_CAPABILITIES];
 
@@ -40,6 +114,8 @@ export interface MachineRuntime {
   generatedAt?: string;
   components?: PiWebRuntimeResponse["components"];
   capabilities?: PiWebCapability[];
+  /** Deprecated agent-configuration inputs detected on this machine (union of the web and session daemon reports, deduplicated); omitted when none. */
+  deprecatedAgentInputs?: readonly PiWebDeprecatedAgentInput[];
   error?: string;
 }
 
@@ -62,10 +138,26 @@ export interface PiWebUploadsConfig {
 }
 
 export interface PiWebAgentConfig {
-  /** Pi-compatible companion CLI used for diagnostics and safe package-managed updates. */
+  /** Deprecated and ignored: the multi-implementation CLI abstraction was removed; sessions always run on the bundled pi SDK. Detected for the deprecation warning. */
   command?: string;
-  /** Pi-compatible profile directory containing auth.json, models.json, settings.json, and sessions/. */
+  /** Deprecated alias for the PI_CODING_AGENT_DIR env var: pi agent state directory containing auth.json, models.json, settings.json, and sessions/. */
   dir?: string;
+}
+
+/**
+ * A deprecated agent-configuration input detected on one machine, as reported
+ * over the runtime/status pipeline. Values from the legacy PI_WEB_AGENT_* env
+ * vars and the agent.* config keys are still honored (or, for the removed
+ * command concept, ignored) during the deprecation window; every detected
+ * input is surfaced as a non-dismissable UI warning until the input is removed.
+ */
+export interface PiWebDeprecatedAgentInput {
+  /** Where the input was found: the process environment or the config file. */
+  readonly source: "environment" | "config";
+  /** The deprecated input as the user set it: an env var name or a config key path. */
+  readonly name: string;
+  /** The replacement input; absent when the concept was removed and the input should simply be deleted. */
+  readonly replacement?: string;
 }
 
 export interface PiWebConfigValues {
@@ -83,10 +175,10 @@ export interface PiWebConfigValues {
   /** When true, LLMs can start new sessions via the spawn_session tool. */
   spawnSessions?: boolean;
   /**
-   * Beta: when true, LLMs can start tracked child sessions via the
+   * When true, LLMs can start tracked child sessions via the
    * spawn_subsession / list_subsessions / check_subsession / read_subsession
-   * tools. Off by default
-   * while the capability stabilizes. Requires spawnSessions to be enabled.
+   * tools. On by default; set to `false` to disable. Requires spawnSessions
+   * to be enabled.
    */
   subsessions?: boolean;
   /**
@@ -95,29 +187,95 @@ export interface PiWebConfigValues {
    */
   askUser?: boolean;
   /**
+   * When true, PI WEB appends environment facts to session system prompts:
+   * the pi-web session nesting every session runs in, plus container facts in
+   * Docker deployments. On by default.
+   */
+  environmentFacts?: boolean;
+  /**
    * How long an extension dialog may wait for an answer before the daemon
    * auto-cancels it, in milliseconds. Applies only when the extension set no
    * `timeout` of its own (the sooner of the two wins); `0` waits forever.
    * Tuning knob only — extension dialogs are always enabled.
    */
   extensionDialogsTimeoutMs?: number;
-  /** Desired Pi-compatible agent profile and companion CLI (Pi by default). */
+  /** Deprecated agent-configuration keys, still honored as aliases during the deprecation window and detected for the deprecation warning (see PiWebAgentConfig). */
   agent?: PiWebAgentConfig;
 }
 
 export type PiWebPluginScope = "bundled" | "local" | "user" | "project";
 
+export const PI_WEB_PLUGIN_LIFECYCLE_VERSION = 1;
+
+export type PiWebPluginServerState = "active" | "failed" | "incompatible" | "disabled" | "missing" | "unknown";
+export type PiWebPluginLifecyclePhase = "import" | "activate" | "validate" | "start" | "health" | "stop";
+export type PiWebPluginHealthStatus = "healthy" | "degraded" | "unhealthy";
+export type PiWebPluginRuntimeStatus = "available" | "unavailable" | "incompatible";
+export type PiWebPluginSafeStart = "bundled-only" | "none";
+
+export interface PiWebPluginServerInfo {
+  state: PiWebPluginServerState;
+  desiredRevision?: string;
+  activeRevision?: string;
+  phase?: PiWebPluginLifecyclePhase;
+  message?: string;
+  health?: {
+    status: PiWebPluginHealthStatus;
+    message?: string;
+  };
+  staleRevision: boolean;
+  restartRequired: boolean;
+  /** Exact offline command; plugin ids are restricted to shell-safe bare ids. */
+  disableCommand: string;
+}
+
 export interface PiWebPluginInfo {
   id: string;
-  module: string;
+  /** Browser module URL for the currently discovered package, if any. */
+  module?: string;
   source: string;
   scope: PiWebPluginScope;
   machineSpecific: boolean;
+  /** Desired config state; the active server snapshot may intentionally differ. */
   enabled: boolean;
+  /** False when only the still-active sessiond snapshot knows this plugin. */
+  discovered: boolean;
+  /** A duplicate id was diagnosed in either the desired or active catalog. */
+  conflict: boolean;
+  server?: PiWebPluginServerInfo;
+}
+
+export interface PiWebPluginDiagnostic {
+  kind: "conflict" | "discovery";
+  snapshot: "desired" | "active";
+  source: string;
+  message: string;
+  pluginId?: string;
+}
+
+export interface PiWebPluginRecoveryCommands {
+  showSafeStart: string;
+  bundledOnly: string;
+  noServerPlugins: string;
+  clearSafeStart: string;
+}
+
+export interface PiWebPluginRuntimeInfo {
+  status: PiWebPluginRuntimeStatus;
+  /** Safe-start level active in sessiond; absence means sessiond started normally. */
+  safeStart?: PiWebPluginSafeStart;
+  /** Current offline recovery config, including explicit `off` when known. */
+  desiredSafeStart?: PiWebPluginSafeStart | "off";
+  restartRequired: boolean;
+  message?: string;
+  recovery: PiWebPluginRecoveryCommands;
 }
 
 export interface PiWebPluginsResponse {
+  lifecycleVersion: typeof PI_WEB_PLUGIN_LIFECYCLE_VERSION;
   plugins: PiWebPluginInfo[];
+  diagnostics: PiWebPluginDiagnostic[];
+  serverRuntime: PiWebPluginRuntimeInfo;
 }
 
 export type PiPackageScope = "user" | "project";
@@ -157,8 +315,6 @@ export interface PiPackageMutationResponse extends PiPackagesResponse {
   removed?: boolean;
 }
 
-export type PiWebAgentDirEnvSource = "pi-web" | "pi-compatibility";
-
 export interface PiWebConfigEnvOverrides {
   host: boolean;
   port: boolean;
@@ -166,11 +322,6 @@ export interface PiWebConfigEnvOverrides {
   spawnSessions: boolean;
   subsessions: boolean;
   askUser: boolean;
-  agentCommand: boolean;
-  agentDir: boolean;
-  /** The configured directory environment source, even when Pi compatibility is inactive for the desired command. */
-  agentDirSource?: PiWebAgentDirEnvSource;
-  agentSessionDir: boolean;
 }
 
 export interface PiWebConfigResponse {
@@ -189,21 +340,60 @@ export interface Project {
 }
 
 export interface WorkspaceEffectiveConfig {
-  uploads?: PiWebUploadsConfig;
+  readonly uploads?: Readonly<PiWebUploadsConfig>;
 }
 
-export interface Workspace {
-  id: string;
-  projectId: string;
-  path: string;
-  label: string;
-  branch?: string;
-  isMain: boolean;
-  isGitRepo: boolean;
-  isGitWorktree: boolean;
-  /** Workspace-effective project/global settings needed by workspace UI features. Always present on current server workspace responses. */
-  effectiveConfig: WorkspaceEffectiveConfig;
+/** Host-only removal state carried by PI WEB's browser/sessiond protocol. */
+export interface WorkspaceRemovalHostState extends WorkspaceRemovalPresentation {
+  /** Opaque token binding a removal confirmation to this exact owner snapshot. */
+  readonly precondition: string;
 }
+
+export interface WorkspaceRemovalRequest {
+  precondition: string;
+}
+
+export type WorkspaceProviderResolutionStatus = "provider" | "folder" | "degraded";
+export type WorkspaceProviderTier = "primary" | "fallback";
+export type WorkspaceProviderDiagnosticCode = "probe-failed" | "claim-conflict" | "list-failed";
+
+export interface WorkspaceProviderDiagnostic {
+  readonly code: WorkspaceProviderDiagnosticCode;
+  readonly message: string;
+  readonly tier: WorkspaceProviderTier;
+  readonly pluginId?: string;
+  readonly pluginIds?: readonly string[];
+}
+
+/** Provider-neutral result of resolving one project's current workspace owner. */
+export interface WorkspaceProviderResolution {
+  readonly status: WorkspaceProviderResolutionStatus;
+  readonly projectId: string;
+  readonly ownerPluginId?: string;
+  readonly workspaces: readonly Workspace[];
+  readonly diagnostics: readonly WorkspaceProviderDiagnostic[];
+}
+
+/** Host-resolved workspace snapshot. */
+export interface Workspace {
+  readonly id: string;
+  readonly projectId: string;
+  readonly path: string;
+  readonly label: string;
+  readonly isMain: boolean;
+  readonly provider?: WorkspaceProviderMetadata;
+  readonly removal?: WorkspaceRemovalHostState;
+  /** Workspace-effective project/global settings needed by workspace UI features. Always present on current server workspace responses. */
+  readonly effectiveConfig: WorkspaceEffectiveConfig;
+}
+
+/** Workspace as listed by the workspace authority, before the browser route layer attaches the wire-required effectiveConfig. */
+export type WorkspaceListing = Omit<Workspace, "effectiveConfig">;
+
+/** Provider resolution as served by the sessiond workspace authority; the browser route layer attaches effectiveConfig to every workspace before responding. */
+export type WorkspaceProviderAuthorityResolution = Omit<WorkspaceProviderResolution, "workspaces"> & {
+  workspaces: readonly WorkspaceListing[];
+};
 
 export interface SessionRef {
   id: string;
@@ -348,21 +538,6 @@ export interface SessionInfo extends SessionRef {
   messageCount: number;
   firstMessage: string;
   parentSessionPath?: string;
-  /**
-   * Working directory of the parent session, read from the parent session file
-   * header. Only populated when the parent is outside this listing's cwd, so a
-   * child whose parent lives in another worktree can point at it instead of
-   * only reporting that the parent is unavailable here.
-   */
-  parentSessionCwd?: string;
-  /** Session id of an out-of-cwd parent, so the browser can select it after switching workspace. */
-  parentSessionId?: string;
-  /**
-   * Number of sessions in other workspaces of the same project that record this
-   * session as their parent. Only set when non-zero, so a parent can show that
-   * it has children which are not nested beneath it in this workspace.
-   */
-  childSessionsElsewhere?: number;
   archived?: boolean;
   archivedAt?: string;
 }
@@ -875,18 +1050,6 @@ export interface SessionStatus {
   pendingDialogs?: PendingExtensionDialog[];
 }
 
-export interface WorkspaceActivity {
-  cwd: string;
-  hasSessionActivity: boolean;
-  hasTerminalActivity: boolean;
-  updatedAt: string;
-}
-
-export interface WorkspaceActivityResponse {
-  workspaces: WorkspaceActivity[];
-  generatedAt: string;
-}
-
 export interface SlashCommand {
   name: string;
   description?: string;
@@ -896,101 +1059,6 @@ export interface SlashCommand {
 export interface FileSuggestion {
   path: string;
   kind: "tracked" | "untracked" | "other";
-}
-
-export interface FileTreeEntry {
-  name: string;
-  path: string;
-  type: "file" | "directory" | "symlink";
-  size?: number;
-  modifiedAt?: string;
-}
-
-export interface FileTreeResponse {
-  path: string;
-  entries: FileTreeEntry[];
-  scannedAt: string;
-  truncated: boolean;
-}
-
-export type FileContentMediaType = "image";
-
-export interface FileContentResponse {
-  path: string;
-  language?: string;
-  mediaType?: FileContentMediaType;
-  mimeType?: string;
-  encoding: "utf8";
-  size: number;
-  modifiedAt: string;
-  content: string;
-  truncated: boolean;
-  binary: boolean;
-}
-
-export interface WriteWorkspaceFileOptions {
-  createDirs?: boolean;     // default: true — mkdir -p equivalent
-  overwrite?: boolean;      // default: true — throw if false and file exists
-}
-
-export interface WriteWorkspaceFileResponse {
-  path: string;
-  size: number;
-  modifiedAt: string;
-  created: boolean;  // true if file was created, false if overwritten
-}
-
-export interface DeleteWorkspaceFileResponse {
-  path: string;
-  existed: boolean;  // true if file existed and was deleted, false if file did not exist
-}
-
-export interface MoveWorkspaceFileOptions {
-  createDirs?: boolean;   // default: true — mkdir -p equivalent for target parent directory
-  overwrite?: boolean;    // default: false — throw if target exists (safer default than writeFile)
-}
-
-export interface MoveWorkspaceFileResponse {
-  fromPath: string;
-  toPath: string;
-  size: number;
-  modifiedAt: string;
-}
-
-export type GitFileState = "unmodified" | "modified" | "added" | "deleted" | "renamed" | "copied" | "untracked" | "ignored" | "conflicted";
-
-export interface GitStatusFile {
-  path: string;
-  oldPath?: string;
-  index: GitFileState;
-  workingTree: GitFileState;
-  // Set only on a submodule commit-pointer entry (path equals the submodule's
-  // superproject-relative path). Short SHAs of the recorded and current commit.
-  submoduleFromCommit?: string;
-  submoduleToCommit?: string;
-}
-
-export interface GitStatusResponse {
-  isGitRepo: boolean;
-  hash: string;
-  branch?: string;
-  upstream?: string;
-  ahead?: number;
-  behind?: number;
-  files: GitStatusFile[];
-  // Superproject-relative paths of submodules that carry a change. Files inside
-  // a submodule appear in `files` under `<submodule>/<inner path>`; the client
-  // uses this list to group and label them and to distinguish a submodule root
-  // from an ordinary directory with the same name.
-  submodules: string[];
-}
-
-export interface GitDiffResponse {
-  path?: string;
-  staged: boolean;
-  hash: string;
-  diff: string;
-  truncated: boolean;
 }
 
 export interface TerminalInfo {
@@ -1003,24 +1071,6 @@ export interface TerminalInfo {
   commandRunId?: string;
 }
 
-export type TerminalCommandRunStatus = "queued" | "running" | "succeeded" | "failed";
-
-export interface TerminalCommandRun {
-  id: string;
-  origin: string;
-  projectId: string;
-  workspaceId: string;
-  terminalId: string;
-  title: string;
-  command: string;
-  status: TerminalCommandRunStatus;
-  exitCode?: number;
-  createdAt: string;
-  startedAt?: string;
-  completedAt?: string;
-  metadata: Record<string, string>;
-}
-
 export interface RunTerminalCommandInput {
   workspace: Workspace;
   title: string;
@@ -1029,51 +1079,10 @@ export interface RunTerminalCommandInput {
   open?: boolean;
 }
 
-export interface TerminalCommandRunHandle {
-  run: TerminalCommandRun;
-  completed: Promise<TerminalCommandRun>;
-}
-
-export interface TerminalCommandRunFilter {
-  projectId?: string;
-  workspaceId?: string;
-  terminalId?: string;
-  statuses?: TerminalCommandRunStatus[];
-  metadata?: Record<string, string>;
-}
-
-export type PiWebServiceComponent = "web" | "sessiond";
-export type PiWebStatusSeverity = "info" | "warning" | "error";
-export type PiWebInstallationKind = "pi-package" | "npm-global" | "local" | "docker" | "unknown";
-export type PiWebDockerMode = "runtime" | "dev";
-
-export interface PiWebInstallationInfo {
-  kind: PiWebInstallationKind;
-  path?: string;
-  source?: string;
-  scope?: "user" | "project";
-  npmRoot?: string;
-  dockerMode?: PiWebDockerMode;
-}
-
-export interface PiWebComponentStatus {
-  component: PiWebServiceComponent;
-  label: string;
-  runtimeVersion?: string;
-  installedVersion?: string;
-  stale: boolean;
-  available: boolean;
-  installation?: PiWebInstallationInfo;
-  error?: string;
-}
-
-/** Secret-free identity of the Pi-compatible CLI/state profile fixed for one sessiond lifetime. */
+/** Secret-free identity of the pi agent state directory fixed for one sessiond lifetime. */
 export interface ActiveAgentProfileDescriptor {
-  readonly schemaVersion: 1;
-  readonly revision: string;
-  readonly command: string;
+  readonly schemaVersion: 2;
   readonly dir: string;
-  readonly sessionDirEnvKeys: readonly string[];
 }
 
 export interface PiWebRuntimeComponent {
@@ -1084,33 +1093,9 @@ export interface PiWebRuntimeComponent {
   capabilities: PiWebCapability[];
   /** Present only for a session daemon that supports active-profile reporting. */
   activeAgentProfile?: ActiveAgentProfileDescriptor;
+  /** Deprecated agent-configuration inputs detected in this component's process environment and config file; omitted when none. */
+  deprecatedAgentInputs?: readonly PiWebDeprecatedAgentInput[];
   error?: string;
-}
-
-export interface PiWebReleaseStatus {
-  packageName: string;
-  latestVersion?: string;
-  updateAvailable: boolean;
-  checkedAt?: string;
-  skipped?: boolean;
-  error?: string;
-}
-
-export interface PiWebStatusMessage {
-  id: string;
-  severity: PiWebStatusSeverity;
-  title: string;
-  body: string;
-  command?: string;
-}
-
-export interface PiWebVersionResponse {
-  packageName: string;
-  generatedAt: string;
-  components: {
-    web: PiWebComponentStatus;
-    sessiond: PiWebComponentStatus;
-  };
 }
 
 export interface PiWebRuntimeResponse {
@@ -1123,27 +1108,10 @@ export interface PiWebRuntimeResponse {
   capabilities: PiWebCapability[];
 }
 
-export interface PiWebStatusResponse extends PiWebVersionResponse {
-  release: PiWebReleaseStatus;
-  commands: {
-    update?: string;
-    restart?: string;
-    restartWeb?: string;
-    restartSessiond?: string;
-    status?: string;
-  };
-  messages: PiWebStatusMessage[];
-}
-
 export type TerminalUiEvent =
   | { type: "terminal.created"; terminal: TerminalInfo }
   | { type: "terminal.exited"; terminal: TerminalInfo }
   | { type: "terminal.closed"; terminalId: string; cwd: string };
-
-export interface WorkspaceActivityUiEvent {
-  type: "workspace.activity";
-  activity: WorkspaceActivity;
-}
 
 export interface CommandOption {
   value: string;
@@ -1200,6 +1168,22 @@ export interface SessionTreeNavigateRequest {
 export type SessionTreeNavigateResult =
   | { cancelled: false; editorText?: string }
   | { cancelled: true; aborted?: boolean };
+
+export interface SessionTreeForkRequest {
+  entryId: string;
+  /** Leaf shown when the navigator opened; null is valid for an empty/root position. */
+  expectedLeafId: string | null;
+}
+
+/**
+ * Fork-from-entry creates a new session file up to the selected entry and
+ * switches the runtime to it, leaving the original session untouched. User
+ * entries fork from "before" so their text returns as a `promptDraft` for the
+ * forked session; every other entry forks "at".
+ */
+export type SessionTreeForkResult =
+  | { cancelled: false; session: SessionInfo; promptDraft?: string }
+  | { cancelled: true };
 
 export interface MessagePage {
   messages: unknown[];
@@ -1266,4 +1250,4 @@ export type GlobalSessionEvent =
   | SessionNotificationSummaryEvent
   | SessionUnreadEvent
   | SessionStartupProgressEvent;
-export type RealtimeEvent = GlobalSessionEvent | TerminalUiEvent | WorkspaceActivityUiEvent;
+export type RealtimeEvent = GlobalSessionEvent | TerminalUiEvent | MachineStatusUiEvent;

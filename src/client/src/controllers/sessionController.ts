@@ -1,4 +1,4 @@
-import { api as defaultApi, type AskUserCloseResponse, type AskUserSubmission, type CommandResult, type ExtensionDialogAnswer, type ExtensionDialogCloseReason, type ExtensionDialogCloseResponse, type ExtensionDialogOutcome, type PendingAskUser, type PendingExtensionDialog, type PromptAttachment, type QueuedSessionMessage, type SessionActivity, type SessionBulkFailure, type SessionCleanupExecuteResponse, type SessionInfo, type SessionRef, type SessionStatus, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type Workspace } from "../api";
+import { api as defaultApi, type AskUserCloseResponse, type AskUserSubmission, type CommandResult, type ExtensionDialogAnswer, type ExtensionDialogCloseReason, type ExtensionDialogCloseResponse, type ExtensionDialogOutcome, type PendingAskUser, type PendingExtensionDialog, type PromptAttachment, type QueuedSessionMessage, type SessionActivity, type SessionBulkFailure, type SessionCleanupExecuteResponse, type SessionInfo, type SessionRef, type SessionStatus, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type Workspace } from "../api";
 import type { AppState, ClosedExtensionDialog } from "../appState";
 import { forgetCachedNewSession, isCachedNewSessionInfo, markCachedNewSessionInfo, mergeCachedNewSessions, rememberCachedNewSession, stripCachedNewSessionMarker } from "../cachedNewSessions";
 import { textMessage } from "../chatMessages";
@@ -14,7 +14,6 @@ import { isSessionActive } from "../../../shared/activity";
 import type { PromptAttachmentDelivery, SessionNotificationInboxEvent, SessionStartupProgressEvent } from "../../../shared/apiTypes";
 import { InMemorySessionSelectionMemory, markSessionArchived, markSessionsArchived, selectPreferredSession, selectionAfterArchivingSession, selectionAfterArchivingSessions, shouldDeselectAfterArchivedCollapse, type SessionSelectionMemory } from "./sessionSelection";
 import { selectedMachineId, type GetState, type SetState, type UpdateUrl } from "./types";
-import { sessionPathsEqual } from "../sessionPaths";
 import { TrailingRefreshCoordinator } from "./trailingRefreshCoordinator";
 
 const MESSAGE_PAGE_SIZE = 100;
@@ -511,6 +510,45 @@ export class SessionController {
       throw authoritativeRefreshFailure.error;
     }
     if (this.isSelectedSessionIdentity(session.id, machineId) && this.getState().treeDialog === tree) this.setState({ treeDialog: undefined });
+    return result;
+  }
+
+  async forkFromTree(entryId: string): Promise<SessionTreeForkResult> {
+    const state = this.getState();
+    const session = state.selectedSession;
+    const tree = state.treeDialog;
+    if (session === undefined || tree === undefined || session.archived === true || isClientPendingStartSessionInfo(session)) {
+      throw new Error("The session tree navigator is no longer available");
+    }
+
+    const machineId = selectedMachineId(state);
+    const selectionSeq = this.selectionSeq;
+    const originalCacheKey = machineSessionKey(machineId, session.id);
+    let result: SessionTreeForkResult;
+    try {
+      result = await this.api.forkTree(session, { entryId, expectedLeafId: tree.activeLeafId }, machineId);
+    } catch (error) {
+      if (this.isCurrentSessionSelection(session.id, machineId, selectionSeq)) this.setState({ error: String(error) });
+      throw error;
+    }
+
+    if (result.cancelled) return result;
+
+    const forked = result.session;
+    // The draft belongs to the forked session file; the original keeps its own.
+    if (result.promptDraft !== undefined) saveDraft(machineSessionKey(machineId, forked.id), result.promptDraft);
+    // The daemon replaced the runtime behind the original session identity with
+    // the fork while the request was in flight, so any cached projection of the
+    // original transcript is suspect; drop it so a later reselection reads the
+    // untouched original file authoritatively.
+    this.transcripts.discard(originalCacheKey);
+
+    // The fork happened regardless, but the list/selection update belongs to
+    // whoever owns the selection now; a changed selection may already reflect it.
+    if (!this.isSelectedSessionIdentity(session.id, machineId)) return result;
+    const sessions = [forked, ...this.getState().sessions.filter((candidate) => candidate.id !== forked.id)];
+    this.setState({ sessions, treeDialog: undefined });
+    void this.selectSession(forked);
     return result;
   }
 
@@ -1283,14 +1321,9 @@ export class SessionController {
 
   private applyCreatedSession(session: SessionInfo) {
     const state = this.getState();
-    // A session created in another workspace is not listed here, but it may be a
-    // child of one that is: keep that parent's cross-workspace child count live
-    // instead of leaving it stale until the next listing.
-    if (state.selectedWorkspace?.path !== session.cwd) {
-      const patch = childElsewhereCountPatch(state, session);
-      if (patch !== undefined) this.setState(patch);
-      return;
-    }
+    // Session trees are worktree-scoped, so a session created elsewhere has no
+    // bearing on this listing.
+    if (state.selectedWorkspace?.path !== session.cwd) return;
     if (state.sessions.some((candidate) => candidate.id === session.id)) return;
     const machineId = selectedMachineId(state);
     if (this.hasPendingStartFor(session.cwd, machineId)) {
@@ -1761,27 +1794,6 @@ function bulkFailureMessages(failures: readonly SessionBulkFailure[]): string[] 
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-/**
- * State patch incrementing the cross-workspace child count of the listed parent
- * of `createdSession`, or undefined when that parent is not in view.
- *
- * Exported for testing: it encodes when a session created in another workspace
- * is relevant to the current listing at all.
- */
-export function childElsewhereCountPatch(state: AppState, createdSession: SessionInfo): Pick<Partial<AppState>, "sessions"> | undefined {
-  const parentPath = createdSession.parentSessionPath;
-  if (parentPath === undefined || parentPath === "") return undefined;
-  // The created session's parent path and the listed session's own path reach the
-  // browser from different server producers, so they are compared tolerantly.
-  const isParent = (candidate: SessionInfo) => sessionPathsEqual(candidate.path, parentPath);
-  if (!state.sessions.some(isParent)) return undefined;
-  return {
-    sessions: state.sessions.map((candidate) => isParent(candidate)
-      ? { ...candidate, childSessionsElsewhere: (candidate.childSessionsElsewhere ?? 0) + 1 }
-      : candidate),
-  };
 }
 
 function sessionMessageCountPatch(state: AppState, sessionId: string, messageCount: number | undefined): Pick<Partial<AppState>, "sessions" | "selectedSession"> {

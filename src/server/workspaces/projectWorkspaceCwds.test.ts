@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Project, WorkspaceListing } from "../types.js";
-import { RegisteredProjectWorkspaceCwds, siblingWorkspaceCwds } from "./projectWorkspaceCwds.js";
+import { RegisteredProjectWorkspaceCwds } from "./projectWorkspaceCwds.js";
 
 describe("RegisteredProjectWorkspaceCwds", () => {
   it("returns every workspace path of the project containing the cwd", async () => {
@@ -37,26 +37,6 @@ describe("RegisteredProjectWorkspaceCwds", () => {
   });
 });
 
-describe("siblingWorkspaceCwds", () => {
-  it("excludes the cwd itself from its project's workspaces", async () => {
-    const locator = new RegisteredProjectWorkspaceCwds(deps({ "project-1": ["/srv/dev/pi-web", "/srv/dev/pi-web-feature"] }));
-
-    expect(await siblingWorkspaceCwds(locator, "/srv/dev/pi-web")).toEqual(["/srv/dev/pi-web-feature"]);
-  });
-
-  it("reports no siblings for a single-workspace project", async () => {
-    const locator = new RegisteredProjectWorkspaceCwds(deps({ "project-1": ["/srv/dev/pi-web"] }));
-
-    expect(await siblingWorkspaceCwds(locator, "/srv/dev/pi-web")).toEqual([]);
-  });
-
-  it("reports no siblings for an unregistered cwd", async () => {
-    const locator = new RegisteredProjectWorkspaceCwds(deps({ "project-1": ["/srv/dev/pi-web"] }));
-
-    expect(await siblingWorkspaceCwds(locator, "/srv/dev/elsewhere")).toEqual([]);
-  });
-});
-
 function deps(pathsByProjectId: Record<string, string[]>) {
   const projects = Object.keys(pathsByProjectId).map(project);
   return {
@@ -76,7 +56,5 @@ function workspacesFor(owner: Project, paths: string[]): WorkspaceListing[] {
     path,
     label: path,
     isMain: index === 0,
-    isGitRepo: true,
-    isGitWorktree: true,
   }));
 }

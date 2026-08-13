@@ -1,5 +1,6 @@
-import type { AuthProviderOption, CommandOption, CommandResult, ExtensionDialogAnswer, ExtensionDialogCloseReason, FileContentResponse, FileTreeEntry, GitDiffResponse, GitStatusResponse, Machine, MachineHealth, MachineRuntime, OAuthFlowState, PendingAskUser, PendingExtensionDialog, PiWebStatusResponse, Project, QueuedSessionMessage, SessionActivity, SessionInfo, SessionStatus, SessionTreeSnapshot, TerminalCommandRun, Workspace, WorkspaceActivity } from "./api";
+import type { AuthProviderOption, CommandOption, CommandResult, ExtensionDialogAnswer, ExtensionDialogCloseReason, FileContentResponse, FileTreeEntry, Machine, MachineHealth, MachineRuntime, OAuthFlowState, PendingAskUser, PendingExtensionDialog, PiWebStatusResponse, Project, QueuedSessionMessage, SessionActivity, SessionInfo, SessionStatus, SessionTreeSnapshot, TerminalCommandRun, Workspace } from "./api";
 import type { ChatLine } from "./components/shared";
+import type { MachineStatusSnapshot } from "../../shared/machineStatus";
 import type { QualifiedContributionId } from "./plugins/ids";
 import type { SelectedSessionNotificationInbox } from "./sessionNotifications";
 import type { WorkspaceUploadBatchState } from "./workspaceUploadState";
@@ -10,6 +11,8 @@ export interface AppState {
   isLoadingMachines: boolean;
   machineStatuses: Record<string, MachineHealth>;
   machineRuntimes: Record<string, MachineRuntime>;
+  /** Latest per-machine status tree published by each machine's daemon. */
+  machineStatusSnapshots: Record<string, MachineStatusSnapshot>;
   projects: Project[];
   workspaces: Workspace[];
   sessions: SessionInfo[];
@@ -55,8 +58,6 @@ export interface AppState {
   availableThinkingLevels: readonly string[];
   sessionStatuses: Record<string, SessionStatus>;
   sessionActivities: Record<string, SessionActivity>;
-  workspaceActivities: Record<string, WorkspaceActivity>;
-  machineActivities: Record<string, Record<string, WorkspaceActivity>>;
   /** Authoritative projection plus browser-local optimistic overlays for the selected inbox. */
   selectedNotificationInbox: SelectedSessionNotificationInbox | undefined;
   workspacesByProjectId: Record<string, Workspace[]>;
@@ -76,14 +77,10 @@ export interface AppState {
   expandedDirs: Record<string, FileTreeEntry[]>;
   selectedFilePath: string | undefined;
   selectedFileContent: FileContentResponse | undefined;
+  selectedFileLoadError: string | undefined;
   fileTreeStale: boolean;
   /** Manual workspace file upload batches, keyed by client-owned batch id. */
   workspaceUploadBatches: Record<string, WorkspaceUploadBatchState>;
-  gitStatus: GitStatusResponse | undefined;
-  selectedDiffPath: string | undefined;
-  selectedDiff: GitDiffResponse | undefined;
-  selectedStagedDiff: GitDiffResponse | undefined;
-  gitStale: boolean;
   activeTerminalCount: number;
   selectedTerminalId: string | undefined;
   piWebStatus: PiWebStatusResponse | undefined;
@@ -98,11 +95,12 @@ export interface ClosedExtensionDialog {
   answer?: ExtensionDialogAnswer;
 }
 
+/** `machineId` stays bound to the machine selected when the auth operation began. */
 export type AuthDialogState =
-  | { step: "method" }
-  | { step: "providers"; mode: "login"; authType?: "oauth" | "api_key"; providers: AuthProviderOption[] }
+  | { step: "method"; machineId: string }
+  | { step: "providers"; mode: "login"; machineId: string; authType?: "oauth" | "api_key"; providers: AuthProviderOption[] }
   | { step: "oauth"; flow: OAuthFlowState; machineId: string; responding?: boolean; inputValue?: string; error?: string }
-  | { step: "logout"; providers: AuthProviderOption[] };
+  | { step: "logout"; machineId: string; providers: AuthProviderOption[] };
 
 export type WorkspaceScopedStateReset = Pick<AppState,
   | "sessions"
@@ -114,12 +112,8 @@ export type WorkspaceScopedStateReset = Pick<AppState,
   | "expandedDirs"
   | "selectedFilePath"
   | "selectedFileContent"
+  | "selectedFileLoadError"
   | "fileTreeStale"
-  | "gitStatus"
-  | "selectedDiffPath"
-  | "selectedDiff"
-  | "selectedStagedDiff"
-  | "gitStale"
   | "selectedTerminalId"
   | "error"
 >;
@@ -135,12 +129,8 @@ export function resetWorkspaceScopedState(): WorkspaceScopedStateReset {
     expandedDirs: {},
     selectedFilePath: undefined,
     selectedFileContent: undefined,
+    selectedFileLoadError: undefined,
     fileTreeStale: false,
-    gitStatus: undefined,
-    selectedDiffPath: undefined,
-    selectedDiff: undefined,
-    selectedStagedDiff: undefined,
-    gitStale: false,
     selectedTerminalId: undefined,
     error: "",
   };
@@ -153,6 +143,7 @@ export function initialAppState(): AppState {
     isLoadingMachines: false,
     machineStatuses: {},
     machineRuntimes: {},
+    machineStatusSnapshots: {},
     projects: [],
     workspaces: [],
     sessions: [],
@@ -177,8 +168,6 @@ export function initialAppState(): AppState {
     availableThinkingLevels: [],
     sessionStatuses: {},
     sessionActivities: {},
-    workspaceActivities: {},
-    machineActivities: {},
     selectedNotificationInbox: undefined,
     workspacesByProjectId: {},
     workspaceDeletionRuns: {},
@@ -197,13 +186,9 @@ export function initialAppState(): AppState {
     expandedDirs: {},
     selectedFilePath: undefined,
     selectedFileContent: undefined,
+    selectedFileLoadError: undefined,
     fileTreeStale: false,
     workspaceUploadBatches: {},
-    gitStatus: undefined,
-    selectedDiffPath: undefined,
-    selectedDiff: undefined,
-    selectedStagedDiff: undefined,
-    gitStale: false,
     activeTerminalCount: 0,
     selectedTerminalId: undefined,
     piWebStatus: undefined,

@@ -1,6 +1,6 @@
 import type { TemplateResult } from "lit";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { SessionTreeNavigateResult, SessionTreeSnapshot, SessionTreeSummaryChoice } from "../api";
+import type { SessionTreeForkResult, SessionTreeNavigateResult, SessionTreeSnapshot, SessionTreeSummaryChoice } from "../api";
 import { initialAppState, type AppState } from "../appState";
 import { SessionController } from "../controllers/sessionController";
 // This node-environment test uses the shared, type-guarded template inspection
@@ -9,6 +9,7 @@ import { templateValueAfterMarker } from "../templateInspection.testSupport";
 import { PiWebApp } from "./PiWebApp";
 
 type NavigateHandler = (targetId: string, summaryChoice: SessionTreeSummaryChoice) => Promise<SessionTreeNavigateResult>;
+type ForkHandler = (entryId: string) => Promise<SessionTreeForkResult>;
 type AbortHandler = () => Promise<void>;
 type CancelHandler = () => void;
 type RenderSessionTreeNavigator = (this: PiWebApp, state: AppState) => TemplateResult | null;
@@ -51,6 +52,26 @@ describe("PiWebApp session tree wiring", () => {
     expect(focusChatComposer).toHaveBeenCalledTimes(2);
   });
 
+  it("routes fork requests through SessionController and propagates results and failures", async () => {
+    const app = createApp();
+    const state = setAppTree(app, tree());
+    const controller = appSessionController(app);
+    const forkFromTree = vi.spyOn(controller, "forkFromTree")
+      .mockResolvedValueOnce({ cancelled: true })
+      .mockResolvedValueOnce({ cancelled: false, session: { ...session(), id: "session-fork" } })
+      .mockRejectedValueOnce(new Error("Stop current activity before forking."));
+    const onFork = navigatorForkHandler(renderSessionTreeNavigator(app, state));
+
+    await expect(onFork("side")).resolves.toEqual({ cancelled: true });
+    expect(forkFromTree).toHaveBeenNthCalledWith(1, "side");
+
+    await expect(onFork("root")).resolves.toMatchObject({ cancelled: false, session: { id: "session-fork" } });
+    expect(forkFromTree).toHaveBeenNthCalledWith(2, "root");
+
+    await expect(onFork("failure")).rejects.toThrow("Stop current activity before forking.");
+    expect(forkFromTree).toHaveBeenNthCalledWith(3, "failure");
+  });
+
   it("does not steal focus after the user selects another session during navigation", async () => {
     const app = createApp();
     const state = setAppTree(app, tree());
@@ -83,7 +104,16 @@ function createApp(): PiWebApp {
 
 function setAppTree(app: PiWebApp, treeSnapshot: SessionTreeSnapshot): AppState {
   const selectedSession = {
+    ...session(),
     id: "session-1",
+  };
+  const state = { ...initialAppState(), selectedSession, sessions: [selectedSession], treeDialog: treeSnapshot };
+  if (!Reflect.set(app, "state", state)) throw new Error("Could not set PiWebApp tree state");
+  return state;
+}
+
+function session() {
+  return {
     path: "/tmp/session-1.jsonl",
     cwd: "/repo",
     created: "2026-01-01T00:00:00.000Z",
@@ -91,9 +121,6 @@ function setAppTree(app: PiWebApp, treeSnapshot: SessionTreeSnapshot): AppState 
     messageCount: 2,
     firstMessage: "Initial prompt",
   };
-  const state = { ...initialAppState(), selectedSession, sessions: [selectedSession], treeDialog: treeSnapshot };
-  if (!Reflect.set(app, "state", state)) throw new Error("Could not set PiWebApp tree state");
-  return state;
 }
 
 function renderSessionTreeNavigator(app: PiWebApp, state: AppState): TemplateResult {
@@ -116,6 +143,12 @@ function navigatorNavigateHandler(template: TemplateResult): NavigateHandler {
   return value;
 }
 
+function navigatorForkHandler(template: TemplateResult): ForkHandler {
+  const value = templateValueAfterMarker(template, ".onFork=");
+  if (!isForkHandler(value)) throw new Error("Session tree fork callback was unavailable");
+  return value;
+}
+
 function navigatorAbortHandler(template: TemplateResult): AbortHandler {
   const value = templateValueAfterMarker(template, ".onAbort=");
   if (!isAbortHandler(value)) throw new Error("Session tree abort callback was unavailable");
@@ -133,6 +166,10 @@ function isRenderSessionTreeNavigator(value: unknown): value is RenderSessionTre
 }
 
 function isNavigateHandler(value: unknown): value is NavigateHandler {
+  return typeof value === "function";
+}
+
+function isForkHandler(value: unknown): value is ForkHandler {
   return typeof value === "function";
 }
 

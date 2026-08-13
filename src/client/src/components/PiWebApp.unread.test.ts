@@ -1,9 +1,8 @@
 import type { TemplateResult } from "lit";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Machine, Project, SessionInfo, SessionUnreadEvent, SessionUnreadSummary, Workspace } from "../api";
+import type { Machine, SessionInfo, SessionUnreadEvent, SessionUnreadSummary } from "../api";
 import { initialAppState, type AppState } from "../appState";
 import type { BrowserRealtimeEvent } from "../sessionSocket";
-import type { UnreadPresence } from "../unreadPresence";
 import type { AppMobileMainTab } from "./appShell/AppMobileMainTabs";
 // Template inspection is proportionate here because this node-environment test
 // verifies only PiWebApp's unread-state property wiring into navigation.
@@ -92,20 +91,21 @@ describe("PiWebApp session unread wiring", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("does not acknowledge a selected chat hidden behind a full-screen dialog", async () => {
+  it("does not acknowledge a selected chat hidden behind the rendered-modal boundary", async () => {
     const fetchMock = stubJsonFetch({ catalogId: "catalog-a", catalogRevision: 2, sessions: [] });
     const app = createApp();
+    let modalOpen = true;
+    if (!Reflect.set(app, "isRenderedModalOpen", () => modalOpen)) throw new Error("Could not control the rendered-modal boundary");
     enableUnread(app);
     const selected = session("selected");
     setAppState(app, { ...initialAppState(), sessions: [selected], selectedSession: selected, mainView: "chat" });
     exposeSelectedChat(app);
-    if (!Reflect.set(app, "settingsSection", "general")) throw new Error("Could not open settings");
 
     handleRealtimeEvent(app, unreadEvent(1, unreadSummary(selected, 1)));
     expect([...navigationUnreadSessionIds(app)]).toEqual([selected.id]);
     expect(fetchMock).not.toHaveBeenCalled();
 
-    if (!Reflect.set(app, "settingsSection", undefined)) throw new Error("Could not close settings");
+    modalOpen = false;
     invokeUpdated(app);
     await vi.waitFor(() => { expect(navigationUnreadSessionIds(app).size).toBe(0); });
     expect(fetchMock).toHaveBeenCalledOnce();
@@ -230,92 +230,11 @@ describe("PiWebApp session unread wiring", () => {
     expect(requests).toContain("https://pi.example.test/api/machines/local/sessions/beta/unread/acknowledge");
     await vi.waitFor(() => { expect(navigationUnreadSessionIds(app).size).toBe(0); });
   });
-
-  it("derives bubble-up unread presence for selected and background machines", () => {
-    stubJsonFetch({ catalogId: "catalog-a", catalogRevision: 2, sessions: [] });
-    const app = createApp();
-    enableUnread(app);
-    const selected = session("selected");
-    setAppState(app, {
-      ...initialAppState(),
-      machines: [machine("local"), machine("remote")],
-      selectedMachine: machine("local"),
-      projects: [project("project-1")],
-      workspaces: [workspace("ws-1", "project-1", "/repo")],
-      workspacesByProjectId: { "project-1": [workspace("ws-1", "project-1", "/repo")] },
-      sessions: [selected],
-      selectedSession: selected,
-      mainView: "chat",
-    });
-
-    handleRealtimeEvent(app, unreadEvent(1, unreadSummary(selected, 1)));
-    expect([...unreadPresence(app).machines]).toEqual(["local"]);
-    expect([...unreadPresence(app).projects]).toEqual(["project-1"]);
-    expect([...unreadPresence(app).workspaces]).toEqual(["ws-1"]);
-
-    const remoteSession = { ...session("remote-session"), cwd: "/unmapped" };
-    handleMachineActivityEvent(app, "remote", unreadEvent(1, unreadSummary(remoteSession, 1)));
-    expect([...unreadPresence(app).machines].sort()).toEqual(["local", "remote"]);
-    // Background cwds never leak into the selected machine's workspace/project rows.
-    expect([...unreadPresence(app).projects]).toEqual(["project-1"]);
-    expect([...unreadPresence(app).workspaces]).toEqual(["ws-1"]);
-  });
-
-  it("recomputes bubble-up presence when workspace data loads after the unread event", () => {
-    stubJsonFetch({ catalogId: "catalog-a", catalogRevision: 2, sessions: [] });
-    const app = createApp();
-    enableUnread(app);
-    const selected = session("selected");
-    setAppState(app, {
-      ...initialAppState(),
-      machines: [machine("local")],
-      selectedMachine: machine("local"),
-      sessions: [selected],
-      selectedSession: selected,
-      mainView: "chat",
-    });
-
-    handleRealtimeEvent(app, unreadEvent(1, unreadSummary(selected, 1)));
-    expect([...unreadPresence(app).machines]).toEqual(["local"]);
-    expect(unreadPresence(app).projects.size).toBe(0);
-    expect(unreadPresence(app).workspaces.size).toBe(0);
-
-    setState(app, {
-      projects: [project("project-1")],
-      workspaces: [workspace("ws-1", "project-1", "/repo")],
-      workspacesByProjectId: { "project-1": [workspace("ws-1", "project-1", "/repo")] },
-    });
-    expect([...unreadPresence(app).projects]).toEqual(["project-1"]);
-    expect([...unreadPresence(app).workspaces]).toEqual(["ws-1"]);
-  });
-
-  it("binds the derived unread presence into the navigation panel", () => {
-    stubJsonFetch({ catalogId: "catalog-a", catalogRevision: 2, sessions: [] });
-    const app = createApp();
-    enableUnread(app);
-    const selected = session("selected");
-    setAppState(app, {
-      ...initialAppState(),
-      machines: [machine("local")],
-      selectedMachine: machine("local"),
-      sessions: [selected],
-      selectedSession: selected,
-      mainView: "chat",
-    });
-
-    handleRealtimeEvent(app, unreadEvent(1, unreadSummary(selected, 1)));
-
-    const bound = navigationPanelValue(app, ".unreadPresence=");
-    if (!isUnreadPresence(bound)) throw new Error("Expected unread presence in navigation");
-    expect(bound).toBe(unreadPresence(app));
-    expect([...bound.machines]).toEqual(["local"]);
-  });
 });
 
 type RenderNavigationPanel = (this: PiWebApp) => TemplateResult;
 type SetAppState = (this: PiWebApp, patch: Partial<AppState>) => void;
 type HandleRealtimeEvent = (this: PiWebApp, machineId: string, event: BrowserRealtimeEvent) => void;
-type HandleMachineActivityEvent = (this: PiWebApp, machineId: string, event: BrowserRealtimeEvent) => void;
 type MobileMainTabs = (this: PiWebApp) => AppMobileMainTab[];
 type UpdatedHook = (this: PiWebApp) => void;
 type DisconnectedHook = (this: PiWebApp) => void;
@@ -366,12 +285,6 @@ function handleRealtimeEvent(app: PiWebApp, event: BrowserRealtimeEvent): void {
   const method: unknown = Reflect.get(app, "handleRealtimeEvent");
   if (!isHandleRealtimeEvent(method)) throw new Error("PiWebApp.handleRealtimeEvent is not callable");
   method.call(app, "local", event);
-}
-
-function handleMachineActivityEvent(app: PiWebApp, machineId: string, event: BrowserRealtimeEvent): void {
-  const method: unknown = Reflect.get(app, "handleMachineActivityEvent");
-  if (!isHandleMachineActivityEvent(method)) throw new Error("PiWebApp.handleMachineActivityEvent is not callable");
-  method.call(app, machineId, event);
 }
 
 function enableUnread(app: PiWebApp): void {
@@ -457,19 +370,6 @@ function navigationPanelValue(app: PiWebApp, marker: string): unknown {
   return templateValueAfterMarker(method.call(app), marker);
 }
 
-function unreadPresence(app: PiWebApp): UnreadPresence {
-  const value: unknown = Reflect.get(app, "unreadPresence");
-  if (!isUnreadPresence(value)) throw new Error("Expected derived unread presence on PiWebApp");
-  return value;
-}
-
-function isUnreadPresence(value: unknown): value is UnreadPresence {
-  if (typeof value !== "object" || value === null) return false;
-  return Reflect.get(value, "machines") instanceof Set
-    && Reflect.get(value, "projects") instanceof Set
-    && Reflect.get(value, "workspaces") instanceof Set;
-}
-
 function machine(id: string): Machine {
   return {
     id,
@@ -478,14 +378,6 @@ function machine(id: string): Machine {
     createdAt: "2026-07-20T00:00:00.000Z",
     updatedAt: "2026-07-20T00:00:00.000Z",
   };
-}
-
-function project(id: string): Project {
-  return { id, name: id, path: "/repo", createdAt: "2026-07-20T00:00:00.000Z" };
-}
-
-function workspace(id: string, projectId: string, path: string): Workspace {
-  return { id, projectId, path, label: id, isMain: true, isGitRepo: true, isGitWorktree: false, effectiveConfig: {} };
 }
 
 function session(id: string): SessionInfo {
@@ -558,10 +450,6 @@ function isSetAppState(value: unknown): value is SetAppState {
 }
 
 function isHandleRealtimeEvent(value: unknown): value is HandleRealtimeEvent {
-  return typeof value === "function";
-}
-
-function isHandleMachineActivityEvent(value: unknown): value is HandleMachineActivityEvent {
   return typeof value === "function";
 }
 

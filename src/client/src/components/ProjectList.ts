@@ -1,9 +1,9 @@
 import { LitElement, html, type PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import type { Project, Workspace, WorkspaceActivity } from "../api";
-import { projectActivityIndicator } from "../workspaceActivity";
+import type { Project } from "../api";
+import type { MachineStatusSnapshot } from "../../../shared/machineStatus";
 import { actionMenuPanelStyle } from "./actionMenu";
-import { renderActionActivityIndicator } from "./activityBadge";
+import { hasStatusUnread, renderActionActivityIndicator, statusActivityKind } from "./activityBadge";
 import type { KeyboardNavigableSection } from "./navigationFocus";
 import { activateSelectableRow, focusSelectedOrFirstSelectableRow, handleSelectableRowKeyboard } from "./selectableRow";
 import { listStyles } from "./shared";
@@ -12,9 +12,8 @@ import { listStyles } from "./shared";
 export class ProjectList extends LitElement implements KeyboardNavigableSection {
   @property({ attribute: false }) projects: Project[] = [];
   @property({ attribute: false }) selected?: Project;
-  @property({ attribute: false }) activities: Record<string, WorkspaceActivity> = {};
-  @property({ attribute: false }) workspacesByProjectId: Record<string, Workspace[]> = {};
-  @property({ attribute: false }) unreadProjectIds: ReadonlySet<string> = new Set();
+  /** Status tree of the machine these projects belong to; absent means no indicators. */
+  @property({ attribute: false }) statusSnapshot: MachineStatusSnapshot | undefined;
   @property({ type: Boolean, reflect: true }) collapsible = false;
   @property({ type: Boolean, reflect: true }) collapsed = false;
   @property({ attribute: false }) onSelect?: (project: Project) => void;
@@ -101,8 +100,9 @@ export class ProjectList extends LitElement implements KeyboardNavigableSection 
   }
 
   private renderActivity(project: Project) {
-    const kind = projectActivityIndicator(project, this.workspacesByProjectId[project.id] ?? [], this.activities);
-    const unreadLabel = this.unreadProjectIds.has(project.id) ? "Unread sessions in this project" : undefined;
+    const flags = this.statusSnapshot?.projects[project.id];
+    const kind = statusActivityKind(flags);
+    const unreadLabel = hasStatusUnread(flags) ? "Unread sessions in this project" : undefined;
     return renderActionActivityIndicator(kind, kind === "terminal" ? "Project terminal active" : "Project active", unreadLabel);
   }
 

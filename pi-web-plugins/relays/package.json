@@ -3,7 +3,7 @@
   "private": true,
   "piWeb": {
     "plugins": [
-      { "id": "relays", "module": "pi-web-plugin.js" }
+      { "id": "relays", "browserRoot": ".", "module": "pi-web-plugin.js" }
     ]
   }
 }

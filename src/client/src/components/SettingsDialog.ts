@@ -3,6 +3,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import type { AppAction } from "../actions";
 import { configApi, piPackagesApi, pluginsApi, type Machine, type MachineRuntime, type PiPackageMutationResponse, type PiPackageScope, type PiPackagesResponse, type PiWebConfigResponse, type PiWebConfigValues, type PiWebPluginsResponse } from "../api";
 import type { SettingsSection } from "../settingsRoute";
+import "./ModalSurface";
 import "./settings/SettingsGeneralPanel";
 import "./settings/SettingsSessiondPanel";
 import "./settings/SettingsPackagesPanel";
@@ -11,7 +12,7 @@ import "./settings/SettingsShortcutsPanel";
 import { friendlyPiPackageErrorMessage, piPackageMutationFollowUpMessage, piPackageTargetLabel, shouldRefreshGatewayPluginsAfterPiPackageMutation, type PiPackageOperationState, type PiPackageTargetContext } from "./settings/piPackageSettings";
 import { loadGatewaySettingsData, loadPiPackagesData } from "./settings/settingsDataLoading";
 import { mergeSelectedMachineAccessConfig } from "./settings/settingsMachineAccessConfig";
-import { friendlySelectedMachineSettingsErrorMessage, settingsMachineTarget, settingsMachineTargetLabel, type SettingsMachineTarget } from "./settings/settingsMachineTarget";
+import { friendlySelectedMachineSettingsErrorMessage, isSelectedMachineSettingsUnsupported, pluginLifecycleSupport, selectedMachineSettingsSupportKey, settingsMachineTarget, settingsMachineTargetLabel, type PluginLifecycleSupport, type SettingsMachineTarget } from "./settings/settingsMachineTarget";
 import { mergeSelectedMachinePluginConfig, pluginEnabledConfigPatch } from "./settings/settingsPluginConfig";
 import { mergeSelectedMachineSessiondConfig } from "./settings/settingsSessiondConfig";
 
@@ -71,44 +72,50 @@ export class SettingsDialog extends LitElement {
 
   protected override updated(changed: PropertyValues<this>): void {
     const currentTarget = this.settingsTarget();
-    if (!changed.has("machine")) return;
-    const previousTarget = settingsMachineTarget(changed.get("machine"));
-    if (previousTarget.id === currentTarget.id) return;
-    this.resetAccessStateForTargetChange();
-    if (this.isConnected) void this.loadAccessConfigForTarget(currentTarget);
-    this.resetSessiondStateForTargetChange();
-    if (this.isConnected) void this.loadSessiondConfigForTarget(currentTarget);
+    if (changed.has("machine")) {
+      const previousTarget = settingsMachineTarget(changed.get("machine"));
+      if (previousTarget.id !== currentTarget.id) {
+        this.resetAccessStateForTargetChange();
+        if (this.isConnected) void this.loadAccessConfigForTarget(currentTarget);
+        this.resetSessiondStateForTargetChange();
+        if (this.isConnected) void this.loadSessiondConfigForTarget(currentTarget);
+        this.resetPluginStateForTargetChange();
+        if (this.isConnected) void this.loadPluginsForTarget(currentTarget);
+        this.resetPackageStateForTargetChange();
+        if (this.isConnected) void this.loadPackagesForTarget(currentTarget);
+        return;
+      }
+    }
+
+    if (!changed.has("machineRuntime")) return;
+    if (!this.pluginLifecycleSupportNeedsReload(changed.get("machineRuntime"), currentTarget)) return;
     this.resetPluginStateForTargetChange();
     if (this.isConnected) void this.loadPluginsForTarget(currentTarget);
-    this.resetPackageStateForTargetChange();
-    if (this.isConnected) void this.loadPackagesForTarget(currentTarget);
   }
 
   override render(): TemplateResult {
     return html`
-      <div class="backdrop" @mousedown=${() => this.onClose?.()}>
-        <section class="settings-shell" role="dialog" aria-modal="true" aria-label="PI WEB settings" @mousedown=${(event: MouseEvent) => { event.stopPropagation(); }} @keydown=${(event: KeyboardEvent) => { this.handleKeyDown(event); }}>
-          <header class="settings-header">
-            <div>
-              <span class="eyebrow">Settings</span>
-              <h1>PI WEB</h1>
-            </div>
-            <button class="close-button" title="Close settings" aria-label="Close settings" @click=${() => this.onClose?.()}>×</button>
-          </header>
-          <div class="settings-body">
-            <nav class="settings-nav" aria-label="Settings sections">
-              ${this.renderNavButton("general", "General", "Gateway + selected machine")}
-              ${this.renderNavButton("sessiond", "Session daemon", "Selected machine")}
-              ${this.renderNavButton("packages", "Pi packages", "Selected machine")}
-              ${this.renderNavButton("plugins", "PI WEB plugins", "Selected machine")}
-              ${this.renderNavButton("shortcuts", "Keyboard", "Gateway shortcuts")}
-            </nav>
-            <main class="settings-content">
-              ${this.renderActiveSection()}
-            </main>
+      <modal-surface .onClose=${() => this.onClose?.()} .label=${"PI WEB settings"}>
+        <header class="settings-header">
+          <div>
+            <span class="eyebrow">Settings</span>
+            <h1>PI WEB</h1>
           </div>
-        </section>
-      </div>
+          <button class="close-button" title="Close settings" aria-label="Close settings" @click=${() => this.onClose?.()}>×</button>
+        </header>
+        <div class="settings-body">
+          <nav class="settings-nav" aria-label="Settings sections">
+            ${this.renderNavButton("general", "General", "Gateway + selected machine")}
+            ${this.renderNavButton("sessiond", "Session daemon", "Selected machine")}
+            ${this.renderNavButton("packages", "Pi packages", "Selected machine")}
+            ${this.renderNavButton("plugins", "PI WEB plugins", "Selected machine")}
+            ${this.renderNavButton("shortcuts", "Keyboard", "Gateway shortcuts")}
+          </nav>
+          <main class="settings-content">
+            ${this.renderActiveSection()}
+          </main>
+        </div>
+      </modal-surface>
     `;
   }
 
@@ -125,7 +132,6 @@ export class SettingsDialog extends LitElement {
           .error=${this.sessiondError}
           .savedMessage=${this.savedMessage}
           .targetLabel=${settingsMachineTargetLabel(this.settingsTarget())}
-          .activeAgentProfile=${this.machineRuntime?.components?.sessiond.activeAgentProfile}
           .onReload=${() => this.reloadSessiondState()}
           .onSave=${(config: PiWebConfigValues) => this.saveSessiondConfig(config)}
         ></settings-sessiond-panel>
@@ -168,6 +174,7 @@ export class SettingsDialog extends LitElement {
           .pluginsResponse=${this.selectedPluginsResponse}
           .loading=${this.pluginLoading}
           .saving=${this.saving}
+          .recoveryCommandsSupported=${this.pluginLifecycleSupport().state === "supported"}
           .error=${this.pluginError}
           .savedMessage=${this.savedMessage}
           .targetLabel=${settingsMachineTargetLabel(this.settingsTarget())}
@@ -274,6 +281,21 @@ export class SettingsDialog extends LitElement {
     this.pluginLoading = true;
     this.pluginError = "";
     try {
+      const lifecycleSupport = this.pluginLifecycleSupport(target);
+      if (isSelectedMachineSettingsUnsupported(lifecycleSupport)) {
+        try {
+          const config = await configApi.config(target.id);
+          if (!this.isCurrentPluginLoad(requestSeq, target)) return;
+          this.selectedPluginConfigResponse = config;
+          this.selectedPluginsResponse = undefined;
+          this.pluginError = lifecycleSupport.message ?? `Plugin lifecycle diagnostics are not available on ${settingsMachineTargetLabel(target)}.`;
+        } catch (error) {
+          if (!this.isCurrentPluginLoad(requestSeq, target)) return;
+          this.pluginError = `Failed to load PI WEB plugin config from ${settingsMachineTargetLabel(target)}: ${friendlySelectedMachineSettingsErrorMessage(errorMessage(error), target)}; ${lifecycleSupport.message ?? "plugin lifecycle diagnostics are unsupported"}`;
+        }
+        return;
+      }
+
       const [config, plugins] = await Promise.allSettled([configApi.config(target.id), pluginsApi.plugins(target.id)]);
       if (!this.isCurrentPluginLoad(requestSeq, target)) return;
 
@@ -309,6 +331,7 @@ export class SettingsDialog extends LitElement {
   private async togglePlugin(pluginId: string, enabled: boolean): Promise<void> {
     if (this.saving) return;
     const target = this.settingsTarget();
+    const lifecycleSupport = this.pluginLifecycleSupport(target);
     if (this.selectedPluginConfigResponse === undefined) {
       this.pluginError = `Plugin config is not loaded for ${settingsMachineTargetLabel(target)}. Reload before changing plugin enablement.`;
       return;
@@ -325,7 +348,13 @@ export class SettingsDialog extends LitElement {
         this.configResponse = mergeSelectedMachinePluginConfig(this.configResponse, response);
         this.onConfigSaved?.(this.configResponse.effectiveConfig);
       }
-      const pluginRefreshError = await this.refreshPluginsForTarget(target);
+      let pluginRefreshError: string | undefined;
+      if (isSelectedMachineSettingsUnsupported(lifecycleSupport)) {
+        this.selectedPluginsResponse = undefined;
+        pluginRefreshError = lifecycleSupport.message ?? `Plugin lifecycle diagnostics are not available on ${settingsMachineTargetLabel(target)}.`;
+      } else {
+        pluginRefreshError = await this.refreshPluginsForTarget(target);
+      }
       if (!this.isCurrentSettingsTarget(target)) return;
       if (pluginRefreshError !== undefined) this.pluginError = pluginRefreshError;
       this.showSavedMessage();
@@ -458,6 +487,7 @@ export class SettingsDialog extends LitElement {
       if (this.isCurrentSettingsTarget(target)) this.selectedPluginsResponse = response;
       return undefined;
     } catch (error) {
+      if (this.isCurrentSettingsTarget(target)) this.selectedPluginsResponse = undefined;
       return `Config saved, but failed to refresh PI WEB plugins from ${settingsMachineTargetLabel(target)}: ${friendlySelectedMachineSettingsErrorMessage(errorMessage(error), target)}`;
     }
   }
@@ -468,6 +498,16 @@ export class SettingsDialog extends LitElement {
 
   private packageTarget(): PiPackageTargetContext {
     return this.settingsTarget();
+  }
+
+  private pluginLifecycleSupport(target = this.settingsTarget()): PluginLifecycleSupport {
+    return pluginLifecycleSupport(target, this.machineRuntime);
+  }
+
+  private pluginLifecycleSupportNeedsReload(previousRuntime: MachineRuntime | undefined, target: SettingsMachineTarget): boolean {
+    const previousSupport = pluginLifecycleSupport(target, previousRuntime);
+    const currentSupport = this.pluginLifecycleSupport(target);
+    return selectedMachineSettingsSupportKey(previousSupport) !== selectedMachineSettingsSupportKey(currentSupport);
   }
 
   private isCurrentLoad(requestSeq: number): boolean {
@@ -548,24 +588,16 @@ export class SettingsDialog extends LitElement {
     }, 3000);
   }
 
-  private handleKeyDown(event: KeyboardEvent): void {
-    if (event.key !== "Escape") return;
-    event.preventDefault();
-    event.stopPropagation();
-    this.onClose?.();
-  }
-
   static override styles = css`
     :host { position: fixed; inset: 0; z-index: 30; color: var(--pi-text); font: 14px system-ui, sans-serif; }
-    .backdrop { box-sizing: border-box; width: 100%; height: 100dvh; display: grid; place-items: center; padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); background: var(--pi-overlay); overflow: hidden; }
-    .settings-shell { width: min(980px, 100%); max-height: min(760px, 100%); min-height: min(620px, 100%); display: grid; grid-template-rows: auto minmax(0, 1fr); border: 1px solid var(--pi-border); border-radius: 14px; background: var(--pi-bg); box-shadow: 0 20px 60px var(--pi-shadow-strong); overflow: hidden; }
+    modal-surface { --modal-surface-backdrop-padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); --modal-surface-width: min(980px, 100%); --modal-surface-max-height: min(760px, 100%); --modal-surface-min-height: min(620px, 100%); --modal-surface-radius: 14px; }
     .settings-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--pi-border); }
     .eyebrow { display: block; color: var(--pi-muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
     h1 { margin: 0; font-size: 20px; line-height: 1.2; }
     button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; font: inherit; cursor: pointer; }
     .close-button { width: 34px; height: 34px; display: grid; place-items: center; border: 0; background: transparent; color: var(--pi-muted); padding: 0; font-size: 24px; }
     .close-button:hover, .close-button:focus { color: var(--pi-text); background: var(--pi-surface-hover); }
-    .settings-body { min-height: 0; display: grid; grid-template-columns: 220px minmax(0, 1fr); }
+    .settings-body { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 220px minmax(0, 1fr); }
     .settings-nav { min-height: 0; padding: 10px; border-right: 1px solid var(--pi-border); background: var(--pi-surface); overflow: auto; }
     .settings-nav button { display: grid; gap: 2px; width: 100%; margin: 0 0 6px; text-align: left; border-color: transparent; background: transparent; }
     .settings-nav button:hover, .settings-nav button:focus { background: var(--pi-surface-hover); }
@@ -574,8 +606,7 @@ export class SettingsDialog extends LitElement {
     .settings-content { min-width: 0; min-height: 0; overflow: auto; padding: 18px; }
 
     @media (max-width: 760px) {
-      .backdrop { padding: 0; place-items: stretch; }
-      .settings-shell { width: 100%; height: 100dvh; max-height: none; min-height: 0; border: 0; border-radius: 0; }
+      modal-surface { --modal-surface-backdrop-padding: 0; --modal-surface-place-items: stretch; --modal-surface-width: 100%; --modal-surface-max-height: none; --modal-surface-min-height: 0; --modal-surface-border: 0; --modal-surface-radius: 0; }
       .settings-header { padding: max(12px, env(safe-area-inset-top)) 12px 12px; }
       .settings-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
       .settings-nav { display: flex; gap: 8px; padding: 8px; border-right: 0; border-bottom: 1px solid var(--pi-border); overflow-x: auto; overflow-y: hidden; }

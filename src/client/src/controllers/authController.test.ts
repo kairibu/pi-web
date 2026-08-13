@@ -27,7 +27,7 @@ describe("AuthController", () => {
     const providers = [authProvider("anthropic", "oauth"), { ...authProvider("anthropic", "api_key"), loginFlow: "interactive" as const }];
     const calls: string[] = [];
     const { controller } = createController(
-      { authDialog: { step: "providers", mode: "login", providers } },
+      { authDialog: { step: "providers", mode: "login", machineId: "local", providers } },
       {
         startOAuthLogin: (providerId) => {
           calls.push(`oauth:${providerId}`);
@@ -55,7 +55,7 @@ describe("AuthController", () => {
     const provider: AuthProviderOption = { ...authProvider("amazon-bedrock", "api_key"), loginFlow: "interactive" };
     const calls: { providerId: string; machineId: string | undefined }[] = [];
     const { controller, getState } = createController(
-      { authDialog: { step: "providers", mode: "login", authType: "api_key", providers: [provider] } },
+      { authDialog: { step: "providers", mode: "login", machineId: "local", authType: "api_key", providers: [provider] } },
       {
         startInteractiveApiKeyLogin: (providerId, machineId) => {
           calls.push({ providerId, machineId });
@@ -76,6 +76,350 @@ describe("AuthController", () => {
       controller.dispose();
       vi.unstubAllGlobals();
     }
+  });
+
+  it("starts, polls, and cancels a federated OAuth login on the selected remote machine", async () => {
+    let pollCallback: (() => void) | undefined;
+    vi.stubGlobal("window", {
+      setInterval: (callback: () => void) => {
+        pollCallback = callback;
+        return 1;
+      },
+      clearInterval: () => undefined,
+    });
+    const provider = authProvider("anthropic", "oauth");
+    const flow = oauthFlow({ auth: { url: "https://provider.example/authorize" }, prompt: { requestId: "request-1", message: "Paste callback", promptType: "manual_code" } });
+    const startCalls: { providerId: string; machineId: string | undefined }[] = [];
+    const pollCalls: { flowId: string; machineId: string | undefined }[] = [];
+    const cancelCalls: { flowId: string; machineId: string | undefined }[] = [];
+    const { controller, getState } = createController(
+      {
+        selectedMachine: remoteMachine("remote-1"),
+        authDialog: { step: "providers", mode: "login", machineId: "remote-1", authType: "oauth", providers: [provider] },
+      },
+      {
+        startOAuthLogin: (providerId, machineId) => {
+          startCalls.push({ providerId, machineId });
+          return Promise.resolve(flow);
+        },
+        oauthFlow: (flowId, machineId) => {
+          pollCalls.push({ flowId, machineId });
+          return Promise.resolve(flow);
+        },
+        cancelOAuthFlow: (flowId, machineId) => {
+          cancelCalls.push({ flowId, machineId });
+          return Promise.resolve(oauthFlow({ status: "cancelled" }));
+        },
+      },
+    );
+
+    try {
+      await controller.selectLoginProvider(provider.id, "oauth");
+
+      expect(startCalls).toEqual([{ providerId: "anthropic", machineId: "remote-1" }]);
+      expect(getState().authDialog).toMatchObject({ step: "oauth", machineId: "remote-1", flow: { flowId: "flow-1" } });
+      expect(getState().error).toBe("");
+
+      if (pollCallback === undefined) throw new Error("Expected auth polling to start");
+      pollCallback();
+      await flushMicrotasks();
+
+      expect(pollCalls).toEqual([{ flowId: "flow-1", machineId: "remote-1" }]);
+
+      await controller.cancelOAuth();
+
+      expect(cancelCalls).toEqual([{ flowId: "flow-1", machineId: "remote-1" }]);
+      expect(getState().authDialog).toBeUndefined();
+    } finally {
+      controller.dispose();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("completes a federated OAuth login by responding to the remote machine that owns the flow", async () => {
+    const flow = oauthFlow({ prompt: { requestId: "request-1", message: "Paste callback", promptType: "manual_code" } });
+    const session = sessionInfo("session-1");
+    const refreshedStatus = sessionStatus(session.id);
+    const respondCalls: { flowId: string; requestId: string; value: string; machineId: string | undefined }[] = [];
+    const statusCalls: { machineId: string | undefined }[] = [];
+    const appliedStatuses: SessionStatus[] = [];
+    const { controller, getState } = createController(
+      {
+        selectedMachine: remoteMachine("remote-1"),
+        selectedSession: session,
+        authDialog: { step: "oauth", flow, machineId: "remote-1", inputValue: "https://localhost:54545/callback?code=abc" },
+      },
+      {
+        respondOAuthFlow: (flowId, requestId, value, machineId) => {
+          respondCalls.push({ flowId, requestId, value, machineId });
+          return Promise.resolve(oauthFlow({ status: "complete" }));
+        },
+        status: (_session, machineId) => {
+          statusCalls.push({ machineId });
+          return Promise.resolve(refreshedStatus);
+        },
+      },
+      (status) => { appliedStatuses.push(status); },
+    );
+
+    await controller.respondOAuth();
+    await flushMicrotasks();
+
+    expect(respondCalls).toEqual([{ flowId: "flow-1", requestId: "request-1", value: "https://localhost:54545/callback?code=abc", machineId: "remote-1" }]);
+    expect(getState().authDialog).toBeUndefined();
+    expect(statusCalls).toEqual([{ machineId: "remote-1" }]);
+    expect(appliedStatuses).toEqual([refreshedStatus]);
+  });
+
+  it("logs an OAuth provider out on the selected remote machine", async () => {
+    const provider = authProvider("anthropic", "oauth");
+    const logoutCalls: { providerId: string; machineId: string | undefined }[] = [];
+    const { controller, getState } = createController(
+      {
+        selectedMachine: remoteMachine("remote-1"),
+        authDialog: { step: "logout", machineId: "remote-1", providers: [provider] },
+      },
+      {
+        logoutProvider: (providerId, machineId) => {
+          logoutCalls.push({ providerId, machineId });
+          return Promise.resolve({ accepted: true as const });
+        },
+      },
+    );
+
+    await controller.logoutProvider(provider.id);
+
+    expect(logoutCalls).toEqual([{ providerId: "anthropic", machineId: "remote-1" }]);
+    expect(getState().authDialog).toBeUndefined();
+    expect(getState().error).toBe("");
+  });
+
+  it("logs an OAuth provider out on a remote machine from the /logout command", async () => {
+    const provider = authProvider("anthropic", "oauth");
+    const logoutCalls: { providerId: string; machineId: string | undefined }[] = [];
+    const { controller, getState } = createController(
+      { selectedMachine: remoteMachine("remote-1") },
+      {
+        authProviders: () => Promise.resolve({ providers: [provider] }),
+        logoutProvider: (providerId, machineId) => {
+          logoutCalls.push({ providerId, machineId });
+          return Promise.resolve({ accepted: true as const });
+        },
+      },
+    );
+
+    await controller.openLogout(provider.id);
+
+    expect(logoutCalls).toEqual([{ providerId: "anthropic", machineId: "remote-1" }]);
+    expect(getState().error).toBe("");
+  });
+
+  it("keeps method-based provider selection bound to the machine where login opened", async () => {
+    const provider = authProvider("anthropic", "oauth");
+    const providerLookup = deferred<{ providers: AuthProviderOption[] }>();
+    const providerLookupMachines: (string | undefined)[] = [];
+    const startMachines: (string | undefined)[] = [];
+    const { controller, getState, setState } = createController(
+      { selectedMachine: remoteMachine("remote-a") },
+      {
+        authProviders: (options) => {
+          providerLookupMachines.push(options?.machineId);
+          return providerLookup.promise;
+        },
+        startOAuthLogin: (_providerId, machineId) => {
+          startMachines.push(machineId);
+          return Promise.resolve(oauthFlow({ status: "complete" }));
+        },
+      },
+    );
+
+    await controller.openLogin();
+    expect(getState().authDialog).toEqual({ step: "method", machineId: "remote-a" });
+
+    const pendingLookup = controller.chooseLoginMethod("oauth");
+    setState({ selectedMachine: remoteMachine("remote-b") });
+    providerLookup.resolve({ providers: [provider] });
+    await pendingLookup;
+
+    expect(providerLookupMachines).toEqual(["remote-a"]);
+    expect(getState().authDialog).toMatchObject({ step: "providers", machineId: "remote-a", providers: [provider] });
+
+    await controller.selectLoginProvider(provider.id, provider.authType);
+
+    expect(startMachines).toEqual(["remote-a"]);
+  });
+
+  it("keeps a direct login command bound while provider discovery is pending", async () => {
+    const provider = authProvider("anthropic", "oauth");
+    const providerLookup = deferred<{ providers: AuthProviderOption[] }>();
+    const startMachines: (string | undefined)[] = [];
+    const { controller, setState } = createController(
+      { selectedMachine: remoteMachine("remote-a") },
+      {
+        authProviders: () => providerLookup.promise,
+        startOAuthLogin: (_providerId, machineId) => {
+          startMachines.push(machineId);
+          return Promise.resolve(oauthFlow({ status: "complete" }));
+        },
+      },
+    );
+
+    const pendingLogin = controller.openLogin(provider.id);
+    setState({ selectedMachine: remoteMachine("remote-b") });
+    providerLookup.resolve({ providers: [provider] });
+    await pendingLogin;
+
+    expect(startMachines).toEqual(["remote-a"]);
+  });
+
+  it("ignores stale direct login discovery after a newer remote flow starts", async () => {
+    const provider = authProvider("anthropic", "oauth");
+    const staleProviderLookup = deferred<{ providers: AuthProviderOption[] }>();
+    const startCalls: { providerId: string; machineId: string | undefined }[] = [];
+    const pollCalls: { flowId: string; machineId: string | undefined }[] = [];
+    const clearedTimers: number[] = [];
+    let pollCallback: (() => void) | undefined;
+    vi.stubGlobal("window", {
+      setInterval: (callback: () => void) => {
+        pollCallback = callback;
+        return 7;
+      },
+      clearInterval: (timer: number) => { clearedTimers.push(timer); },
+    });
+    const { controller, getState, setState } = createController(
+      { selectedMachine: remoteMachine("remote-a") },
+      {
+        authProviders: (options) => options?.machineId === "remote-a"
+          ? staleProviderLookup.promise
+          : Promise.resolve({ providers: [provider] }),
+        startOAuthLogin: (providerId, machineId) => {
+          startCalls.push({ providerId, machineId });
+          return Promise.resolve(oauthFlow({ flowId: machineId === "remote-b" ? "flow-b" : "flow-a" }));
+        },
+        oauthFlow: (flowId, machineId) => {
+          pollCalls.push({ flowId, machineId });
+          return Promise.resolve(oauthFlow({ flowId }));
+        },
+      },
+    );
+
+    try {
+      const staleLogin = controller.openLogin(provider.id);
+      setState({ selectedMachine: remoteMachine("remote-b") });
+      await controller.openLogin(provider.id);
+      const newerDialog = getState().authDialog;
+      const newerPollCallback = pollCallback;
+      if (newerPollCallback === undefined) throw new Error("Expected newer auth polling to start");
+
+      expect(startCalls).toEqual([{ providerId: "anthropic", machineId: "remote-b" }]);
+      expect(newerDialog).toMatchObject({ step: "oauth", machineId: "remote-b", flow: { flowId: "flow-b" } });
+
+      staleProviderLookup.resolve({ providers: [provider] });
+      await staleLogin;
+
+      expect(startCalls).toEqual([{ providerId: "anthropic", machineId: "remote-b" }]);
+      expect(getState().authDialog).toBe(newerDialog);
+      expect(clearedTimers).toEqual([]);
+
+      newerPollCallback();
+      await flushMicrotasks();
+
+      expect(pollCalls).toEqual([{ flowId: "flow-b", machineId: "remote-b" }]);
+      expect(getState().authDialog).toMatchObject({ step: "oauth", machineId: "remote-b", flow: { flowId: "flow-b" } });
+    } finally {
+      staleProviderLookup.resolve({ providers: [provider] });
+      controller.dispose();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps dialog logout bound while provider discovery is pending", async () => {
+    const provider = authProvider("anthropic", "oauth");
+    const providerLookup = deferred<{ providers: AuthProviderOption[] }>();
+    const logoutMachines: (string | undefined)[] = [];
+    const statusMachines: (string | undefined)[] = [];
+    const { controller, getState, setState } = createController(
+      { selectedMachine: remoteMachine("remote-a"), selectedSession: sessionInfo("session-a") },
+      {
+        authProviders: () => providerLookup.promise,
+        logoutProvider: (_providerId, machineId) => {
+          logoutMachines.push(machineId);
+          return Promise.resolve({ accepted: true as const });
+        },
+        status: (session, machineId) => {
+          statusMachines.push(machineId);
+          return Promise.resolve(sessionStatus(session.id));
+        },
+      },
+    );
+
+    const pendingLookup = controller.openLogout();
+    setState({ selectedMachine: remoteMachine("remote-b"), selectedSession: sessionInfo("session-b") });
+    providerLookup.resolve({ providers: [provider] });
+    await pendingLookup;
+
+    expect(getState().authDialog).toMatchObject({ step: "logout", machineId: "remote-a", providers: [provider] });
+
+    await controller.logoutProvider(provider.id);
+    await flushMicrotasks();
+
+    expect(logoutMachines).toEqual(["remote-a"]);
+    expect(statusMachines).toEqual([]);
+  });
+
+  it("keeps a direct logout command bound while provider discovery is pending", async () => {
+    const provider = authProvider("anthropic", "oauth");
+    const providerLookup = deferred<{ providers: AuthProviderOption[] }>();
+    const logoutMachines: (string | undefined)[] = [];
+    const { controller, setState } = createController(
+      { selectedMachine: remoteMachine("remote-a") },
+      {
+        authProviders: () => providerLookup.promise,
+        logoutProvider: (_providerId, machineId) => {
+          logoutMachines.push(machineId);
+          return Promise.resolve({ accepted: true as const });
+        },
+      },
+    );
+
+    const pendingLogout = controller.openLogout(provider.id);
+    setState({ selectedMachine: remoteMachine("remote-b") });
+    providerLookup.resolve({ providers: [provider] });
+    await pendingLogout;
+
+    expect(logoutMachines).toEqual(["remote-a"]);
+  });
+
+  it("ignores stale direct logout discovery after a newer dialog opens", async () => {
+    const provider = authProvider("anthropic", "oauth");
+    const staleProviderLookup = deferred<{ providers: AuthProviderOption[] }>();
+    const logoutMachines: (string | undefined)[] = [];
+    const { controller, getState, setState } = createController(
+      { selectedMachine: remoteMachine("remote-a") },
+      {
+        authProviders: (options) => options?.machineId === "remote-a"
+          ? staleProviderLookup.promise
+          : Promise.resolve({ providers: [provider] }),
+        logoutProvider: (_providerId, machineId) => {
+          logoutMachines.push(machineId);
+          return Promise.resolve({ accepted: true as const });
+        },
+      },
+    );
+
+    const staleLogout = controller.openLogout(provider.id);
+    setState({ selectedMachine: remoteMachine("remote-b") });
+    await controller.openLogout();
+    const newerDialog = getState().authDialog;
+
+    expect(newerDialog).toMatchObject({ step: "logout", machineId: "remote-b", providers: [provider] });
+
+    staleProviderLookup.resolve({ providers: [provider] });
+    await staleLogout;
+
+    expect(logoutMachines).toEqual([]);
+    expect(getState().authDialog).toBe(newerDialog);
+    expect(getState().error).toBe("");
   });
 
   it("keeps OAuth prompt input and submit state across poll refreshes for the same request", async () => {
@@ -244,6 +588,120 @@ describe("AuthController", () => {
     });
   });
 
+  it("submits an OAuth prompt response once when Enter is pressed again while it is in flight", async () => {
+    const prompt = { requestId: "request-1", message: "Paste callback", promptType: "manual_code" } as const;
+    const flow = oauthFlow({ prompt });
+    const response = deferred<OAuthFlowState>();
+    const respondCalls: string[] = [];
+    const { controller } = createController(
+      { authDialog: { step: "oauth", flow, machineId: "local", inputValue: "https://callback" } },
+      {
+        respondOAuthFlow: (_flowId, _requestId, value) => {
+          respondCalls.push(value);
+          return response.promise;
+        },
+      },
+    );
+
+    const firstResponse = controller.respondOAuth();
+    const secondResponse = controller.respondOAuth();
+    await flushMicrotasks();
+
+    expect(respondCalls).toEqual(["https://callback"]);
+
+    response.resolve(oauthFlow({ prompt, progress: ["Still waiting"] }));
+    await firstResponse;
+    await secondResponse;
+
+    expect(respondCalls).toEqual(["https://callback"]);
+  });
+
+  it("submits one OAuth selection when a second option is chosen while the response is in flight", async () => {
+    const flow = oauthFlow({
+      select: {
+        requestId: "request-1",
+        message: "Choose an account",
+        options: [{ value: "acct-1", label: "Account 1" }, { value: "acct-2", label: "Account 2" }],
+      },
+    });
+    const response = deferred<OAuthFlowState>();
+    const respondCalls: string[] = [];
+    const { controller } = createController(
+      { authDialog: { step: "oauth", flow, machineId: "local" } },
+      {
+        respondOAuthFlow: (_flowId, _requestId, value) => {
+          respondCalls.push(value);
+          return response.promise;
+        },
+      },
+    );
+
+    const firstResponse = controller.respondOAuth("acct-1");
+    const secondResponse = controller.respondOAuth("acct-2");
+    await flushMicrotasks();
+
+    expect(respondCalls).toEqual(["acct-1"]);
+
+    response.resolve(oauthFlow({ status: "complete" }));
+    await firstResponse;
+    await secondResponse;
+
+    expect(respondCalls).toEqual(["acct-1"]);
+  });
+
+  it("still cancels the flow while an OAuth response is in flight", async () => {
+    const prompt = { requestId: "request-1", message: "Paste callback", promptType: "manual_code" } as const;
+    const flow = oauthFlow({ prompt });
+    const response = deferred<OAuthFlowState>();
+    const cancelCalls: { flowId: string; machineId: string | undefined }[] = [];
+    const { controller, getState } = createController(
+      { authDialog: { step: "oauth", flow, machineId: "local", inputValue: "https://callback" } },
+      {
+        respondOAuthFlow: () => response.promise,
+        cancelOAuthFlow: (flowId, machineId) => {
+          cancelCalls.push({ flowId, machineId });
+          return Promise.resolve(oauthFlow({ status: "cancelled" }));
+        },
+      },
+    );
+
+    const responsePending = controller.respondOAuth();
+    await flushMicrotasks();
+    await controller.cancelOAuth();
+
+    expect(cancelCalls).toEqual([{ flowId: "flow-1", machineId: "local" }]);
+    expect(getState().authDialog).toBeUndefined();
+
+    response.resolve(oauthFlow({ prompt, progress: ["Stale response"] }));
+    await responsePending;
+
+    expect(getState().authDialog).toBeUndefined();
+  });
+
+  it("lets the user resubmit the same OAuth request after a failed response", async () => {
+    const prompt = { requestId: "request-1", message: "Paste callback", promptType: "manual_code" } as const;
+    const flow = oauthFlow({ prompt });
+    const respondCalls: string[] = [];
+    const { controller, getState } = createController(
+      { authDialog: { step: "oauth", flow, machineId: "local", inputValue: "https://callback" } },
+      {
+        respondOAuthFlow: (_flowId, _requestId, value) => {
+          respondCalls.push(value);
+          return respondCalls.length === 1 ? Promise.reject(new Error("Invalid callback")) : Promise.resolve(oauthFlow({ status: "complete" }));
+        },
+      },
+    );
+
+    await controller.respondOAuth();
+
+    expect(getState().authDialog).toMatchObject({ step: "oauth", responding: false, error: "Error: Invalid callback" });
+
+    await controller.respondOAuth();
+
+    expect(respondCalls).toEqual(["https://callback", "https://callback"]);
+    expect(getState().authDialog).toBeUndefined();
+  });
+
   it("does not recreate an OAuth dialog when a pending response settles during cancellation", async () => {
     const prompt = { requestId: "request-1", message: "Paste callback", promptType: "manual_code" } as const;
     const flow = oauthFlow({ prompt });
@@ -280,7 +738,7 @@ describe("AuthController", () => {
     const { controller, getState } = createController(
       {
         selectedMachine: remoteMachine("remote-1"),
-        authDialog: { step: "providers", mode: "login", authType: "api_key", providers: [provider] },
+        authDialog: { step: "providers", mode: "login", machineId: "remote-1", authType: "api_key", providers: [provider] },
       },
       {
         startInteractiveApiKeyLogin: () => start.promise,
@@ -346,7 +804,7 @@ describe("AuthController", () => {
     const { controller, getState, setState } = createController(
       {
         selectedMachine: remoteMachine("remote-1"),
-        authDialog: { step: "providers", mode: "login", authType: "api_key", providers: [provider] },
+        authDialog: { step: "providers", mode: "login", machineId: "remote-1", authType: "api_key", providers: [provider] },
       },
       {
         startInteractiveApiKeyLogin: () => Promise.resolve(flow),

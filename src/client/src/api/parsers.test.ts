@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ASK_USER_TEXT_MAX_LENGTH, EXTENSION_DIALOG_TEXT_MAX_LENGTH, SESSION_NOTIFICATION_LIMIT, SESSION_NOTIFICATION_MESSAGE_BYTES, SESSION_UNREAD_CATALOG_ID_MAX_LENGTH } from "../../../shared/apiTypes";
-import { parseAskUserCloseResponse, parseAuthProvidersResponse, parseCommandResult, parseExtensionDialogCloseResponse, parseFileContentResponse, parseFileSuggestion, parseGitStatusResponse, parseMachineRuntime, parseMessagePage, parseOAuthFlowState, parsePiPackageMutationResponse, parsePiPackagesResponse, parsePiWebConfigResponse, parsePiWebPluginsResponse, parsePiWebRuntimeResponse, parsePiWebStatusResponse, parseSessionBulkArchiveResponse, parseSessionBulkDeleteArchivedResponse, parseSessionCleanupExecuteResponse, parseSessionCleanupPreviewResponse, parseSessionInfo, parseSessionNotificationInboxEvent, parseSessionNotificationInboxSnapshot, parseSessionStartupProgressEvent, parseSessionStatus, parseSessionStreamSnapshot, parseSessionTreeNavigateResult, parseSessionTreeSnapshot, parseSessionUnreadCatalogSnapshot, parseSessionUnreadEvent, parseSlashCommand, parseTerminalCommandRun, parseTerminalInfo, parseWorkspace, parseWorkspaceActivityResponse } from "./parsers";
+import { parseAskUserCloseResponse, parseAuthProvidersResponse, parseCommandResult, parseExtensionDialogCloseResponse, parseFileContentResponse, parseFileSuggestion, parseMachineRuntime, parseMessagePage, parseOAuthFlowState, parsePiPackageMutationResponse, parsePiPackagesResponse, parsePiWebConfigResponse, parsePiWebPluginsResponse, parsePiWebRuntimeResponse, parsePiWebStatusResponse, parseSessionBulkArchiveResponse, parseSessionBulkDeleteArchivedResponse, parseSessionCleanupExecuteResponse, parseSessionCleanupPreviewResponse, parseSessionInfo, parseSessionNotificationInboxEvent, parseSessionNotificationInboxSnapshot, parseSessionStartupProgressEvent, parseSessionStatus, parseSessionStreamSnapshot, parseSessionTreeForkResult, parseSessionTreeNavigateResult, parseSessionTreeSnapshot, parseSessionUnreadCatalogSnapshot, parseSessionUnreadEvent, parseSlashCommand, parseTerminalCommandRun, parseTerminalInfo, parseWorkspace, parseWorkspaceProviderResolution } from "./parsers";
 
 describe("API parsers", () => {
   it("preserves interactive API-key flow hints and defaults providers without one", () => {
@@ -54,18 +54,21 @@ describe("API parsers", () => {
       exists: true,
       config: { host: "0.0.0.0", port: 8504, allowedHosts: ["example.local"], shortcuts: { "core:view.chat": "mod+1", "core:session.stop": null }, plugins: { info: { enabled: false, settings: { compact: true } } }, pathAccess: { allowedPaths: ["/tmp"] }, uploads: { defaultFolder: "manual/uploads" }, maxUploadBytes: 1234, agent: { command: "agent-lab", dir: "~/agent-profiles/lab" } },
       effectiveConfig: { host: "127.0.0.1", port: 8504, allowedHosts: true, pathAccess: { allowedPaths: ["/tmp"] }, uploads: { defaultFolder: ".pi-web/uploads" }, agent: { command: "agent-lab", dir: "/Users/dev/agent-profiles/lab" } },
-      envOverrides: { host: true, port: false, allowedHosts: false, spawnSessions: false, subsessions: false, askUser: false, agentCommand: false, agentDir: true, agentDirSource: "pi-compatibility", agentSessionDir: false },
+      envOverrides: { host: true, port: false, allowedHosts: false, spawnSessions: false, subsessions: false, askUser: false },
     })).toEqual({
       path: "/tmp/config.json",
       exists: true,
       config: { host: "0.0.0.0", port: 8504, allowedHosts: ["example.local"], shortcuts: { "core:view.chat": "mod+1", "core:session.stop": null }, plugins: { info: { enabled: false, settings: { compact: true } } }, pathAccess: { allowedPaths: ["/tmp"] }, uploads: { defaultFolder: "manual/uploads" }, maxUploadBytes: 1234, agent: { command: "agent-lab", dir: "~/agent-profiles/lab" } },
       effectiveConfig: { host: "127.0.0.1", port: 8504, allowedHosts: true, pathAccess: { allowedPaths: ["/tmp"] }, uploads: { defaultFolder: ".pi-web/uploads" }, agent: { command: "agent-lab", dir: "/Users/dev/agent-profiles/lab" } },
-      envOverrides: { host: true, port: false, allowedHosts: false, spawnSessions: false, subsessions: false, askUser: false, agentCommand: false, agentDir: true, agentDirSource: "pi-compatibility", agentSessionDir: false },
+      envOverrides: { host: true, port: false, allowedHosts: false, spawnSessions: false, subsessions: false, askUser: false },
     });
   });
 
-  it("parses PI WEB runtime responses including the daemon-owned active profile", () => {
-    expect(parsePiWebRuntimeResponse({
+  it("parses PI WEB runtime responses and ignores the daemon-reported active agent profile", () => {
+    // The session daemon still reports its active agent profile for server-side
+    // flows; the client no longer surfaces it, so parsing must drop it without
+    // failing (rolling compatibility with daemons that keep sending it).
+    const parsed = parsePiWebRuntimeResponse({
       packageName: "@jmfederico/pi-web",
       generatedAt: "now",
       components: {
@@ -77,67 +80,83 @@ describe("API parsers", () => {
           available: true,
           capabilities: [],
           activeAgentProfile: {
-            schemaVersion: 1,
-            revision: `sha256:${"a".repeat(64)}`,
-            command: "agent-lab",
-            dir: "/srv/agent-lab",
-            sessionDirEnvKeys: ["PI_WEB_AGENT_SESSION_DIR"],
+            schemaVersion: 2,
+            dir: "/srv/pi-state",
           },
         },
       },
       capabilities: ["piPackages.manage", "future.capability"],
-    })).toMatchObject({
+    });
+
+    expect(parsed.components.sessiond).toEqual({
+      component: "sessiond",
+      label: "Session daemon",
+      runtimeVersion: "1.0.0",
+      available: true,
       capabilities: [],
-      components: { sessiond: { activeAgentProfile: { command: "agent-lab", dir: "/srv/agent-lab" } } },
     });
   });
 
-  it("retains portable active profiles in machine runtime snapshots and rejects invalid ownership", () => {
-    const profile = {
-      schemaVersion: 1,
-      revision: `sha256:${"b".repeat(64)}`,
-      command: "C:\\tools\\pi.exe",
-      dir: "C:\\agent-profiles\\work",
-      sessionDirEnvKeys: ["PI_WEB_AGENT_SESSION_DIR"],
-    };
-    const components = {
-      web: { component: "web", label: "Web/UI", available: true, capabilities: [] },
-      sessiond: { component: "sessiond", label: "Session daemon", available: true, capabilities: [], activeAgentProfile: profile },
-    };
-
-    const parsed = parseMachineRuntime({ machineId: "remote-a", ok: true, checkedAt: "now", components, capabilities: [] });
-
-    expect(parsed.components?.sessiond.activeAgentProfile).toMatchObject({ command: profile.command, dir: profile.dir });
-    expect(Object.isFrozen(parsed.components?.sessiond.activeAgentProfile)).toBe(true);
-    expect(() => parseMachineRuntime({
+  it("ignores the daemon-reported active agent profile in machine runtime snapshots", () => {
+    const parsed = parseMachineRuntime({
       machineId: "remote-a",
       ok: true,
       checkedAt: "now",
-      components: { ...components, web: { ...components.web, activeAgentProfile: profile } },
+      components: {
+        web: { component: "web", label: "Web/UI", available: true, capabilities: [] },
+        sessiond: { component: "sessiond", label: "Session daemon", available: true, capabilities: [], activeAgentProfile: { schemaVersion: 2, dir: "C:\\pi-profiles\\work" } },
+      },
       capabilities: [],
-    })).toThrow("Invalid active agent profile descriptor");
-    expect(() => parseMachineRuntime({
+    });
+
+    expect(parsed.components?.sessiond).toEqual({
+      component: "sessiond",
+      label: "Session daemon",
+      available: true,
+      capabilities: [],
+    });
+  });
+
+  it("parses deprecated agent input reports in machine runtime snapshots", () => {
+    const parsed = parseMachineRuntime({
       machineId: "remote-a",
       ok: true,
       checkedAt: "now",
-      components: { ...components, sessiond: { ...components.sessiond, activeAgentProfile: { ...profile, token: "secret" } } },
-      capabilities: [],
-    })).toThrow("Invalid active agent profile descriptor");
+      deprecatedAgentInputs: [
+        { source: "environment", name: "PI_WEB_AGENT_DIR", replacement: "PI_CODING_AGENT_DIR" },
+        { source: "config", name: "agent.command" },
+      ],
+    });
+
+    expect(parsed.deprecatedAgentInputs).toEqual([
+      { source: "environment", name: "PI_WEB_AGENT_DIR", replacement: "PI_CODING_AGENT_DIR" },
+      { source: "config", name: "agent.command" },
+    ]);
   });
 
-  it("rejects malformed agent directory override metadata", () => {
-    expect(() => parsePiWebConfigResponse({
-      path: "/tmp/config.json",
-      exists: true,
-      config: {},
-      effectiveConfig: {},
-      envOverrides: { host: false, port: false, allowedHosts: false, spawnSessions: false, subsessions: false, askUser: false, agentCommand: false, agentDir: false, agentSessionDir: false, agentDirSource: "future" },
-    })).toThrow("Invalid PI WEB agentDirSource field");
+  it("drops malformed deprecated-input entries but rejects a non-array report", () => {
+    const parsed = parseMachineRuntime({
+      machineId: "remote-a",
+      ok: true,
+      checkedAt: "now",
+      deprecatedAgentInputs: [
+        { source: "environment", name: "PI_WEB_AGENT_DIR", replacement: "PI_CODING_AGENT_DIR" },
+        { source: "process", name: "PI_WEB_AGENT_DIR" },
+        { source: "config" },
+      ],
+    });
+
+    expect(parsed.deprecatedAgentInputs).toEqual([
+      { source: "environment", name: "PI_WEB_AGENT_DIR", replacement: "PI_CODING_AGENT_DIR" },
+    ]);
+
+    expect(() => parseMachineRuntime({ machineId: "remote-a", ok: true, checkedAt: "now", deprecatedAgentInputs: "PI_WEB_AGENT_DIR" }))
+      .toThrow("Invalid PI WEB deprecated agent inputs");
   });
 
-  it("rejects config responses missing a required agent override flag", () => {
-    const envOverrides = { host: false, port: false, allowedHosts: false, spawnSessions: false, subsessions: false, askUser: false, agentCommand: false, agentDir: false, agentSessionDir: false };
-    for (const flag of ["askUser", "agentCommand", "agentDir", "agentSessionDir"] as const) {
+  it("rejects config responses missing a required override flag", () => {
+    const envOverrides = { host: false, port: false, allowedHosts: false, spawnSessions: false, subsessions: false, askUser: false };
+    for (const flag of ["host", "port", "allowedHosts", "spawnSessions", "subsessions", "askUser"] as const) {
       const incomplete = Object.fromEntries(Object.entries(envOverrides).filter(([key]) => key !== flag));
       expect(() => parsePiWebConfigResponse({
         path: "/tmp/config.json",
@@ -198,12 +217,91 @@ describe("API parsers", () => {
     })).toThrow("Invalid PI WEB Docker mode");
   });
 
-  it("parses PI WEB plugin status responses", () => {
-    expect(parsePiWebPluginsResponse({
-      plugins: [{ id: "info", module: "/pi-web-plugins/info/pi-web-plugin.js?v=1", source: "bundled", scope: "bundled", machineSpecific: true, enabled: false }],
-    })).toEqual({
-      plugins: [{ id: "info", module: "/pi-web-plugins/info/pi-web-plugin.js?v=1", source: "bundled", scope: "bundled", machineSpecific: true, enabled: false }],
+  it("parses desired and active PI WEB plugin lifecycle responses", () => {
+    const recovery = {
+      showSafeStart: "pi-web plugins safe-start show",
+      bundledOnly: "pi-web plugins safe-start set bundled-only --restart",
+      noServerPlugins: "pi-web plugins safe-start set none --restart",
+      clearSafeStart: "pi-web plugins safe-start clear --restart",
+    };
+    const response = {
+      lifecycleVersion: 1,
+      plugins: [
+        {
+          id: "info",
+          module: "/pi-web-plugins/info/pi-web-plugin.js?v=1",
+          source: "bundled",
+          scope: "bundled",
+          machineSpecific: true,
+          enabled: false,
+          discovered: true,
+          conflict: true,
+          server: {
+            state: "active",
+            desiredRevision: "2",
+            activeRevision: "1",
+            health: { status: "degraded", message: "tool unavailable" },
+            staleRevision: true,
+            restartRequired: true,
+            disableCommand: "pi-web plugins disable info --restart",
+          },
+        },
+        { id: "workspace-provider", source: "local", scope: "user", enabled: true, discovered: false, conflict: false },
+      ],
+      diagnostics: [{ kind: "conflict", snapshot: "desired", source: "local", message: "Duplicate id", pluginId: "info" }],
+      serverRuntime: { status: "available", safeStart: "bundled-only", desiredSafeStart: "off", restartRequired: true, recovery },
+    };
+
+    expect(parsePiWebPluginsResponse(response)).toEqual({
+      ...response,
+      plugins: [response.plugins[0], { ...response.plugins[1], machineSpecific: false }],
     });
+  });
+
+  it("marks legacy plugin-list responses as lifecycle-incompatible without losing browser plugins", () => {
+    const parsed = parsePiWebPluginsResponse({
+      plugins: [{ id: "info", module: "/pi-web-plugins/info/pi-web-plugin.js?v=1", source: "bundled", scope: "bundled", enabled: true }],
+    });
+
+    expect(parsed.plugins).toEqual([expect.objectContaining({ id: "info", enabled: true, discovered: true, conflict: false })]);
+    expect(parsed.serverRuntime).toMatchObject({ status: "incompatible", restartRequired: false });
+    expect(parsed.serverRuntime.message).toContain("Update and restart PI WEB");
+  });
+
+  it("rejects malformed plugin lifecycle versions and recovery state", () => {
+    expect(() => parsePiWebPluginsResponse({ lifecycleVersion: 2, plugins: [], diagnostics: [], serverRuntime: {} }))
+      .toThrow("Unsupported PI WEB plugin lifecycle version");
+    expect(() => parsePiWebPluginsResponse({
+      lifecycleVersion: 1,
+      plugins: [],
+      diagnostics: [],
+      serverRuntime: {
+        status: "available",
+        desiredSafeStart: "future",
+        restartRequired: false,
+        recovery: {
+          showSafeStart: "show",
+          bundledOnly: "bundled",
+          noServerPlugins: "none",
+          clearSafeStart: "clear",
+        },
+      },
+    })).toThrow("Invalid desired PI WEB server-plugin safe-start state");
+    expect(() => parsePiWebPluginsResponse({
+      lifecycleVersion: 1,
+      plugins: [],
+      diagnostics: [],
+      serverRuntime: {
+        status: "available",
+        restartRequired: false,
+        recovery: {
+          showSafeStart: "pi-web plugins safe-start show --token secret",
+          bundledOnly: "pi-web plugins safe-start set bundled-only --restart",
+          noServerPlugins: "pi-web plugins safe-start set none --restart",
+          clearSafeStart: "pi-web plugins safe-start clear --restart",
+        },
+      },
+    })).toThrow("Invalid PI WEB server plugin recovery commands");
   });
 
   it("parses paged message responses and rejects legacy array message pages", () => {
@@ -493,28 +591,189 @@ describe("API parsers", () => {
     })).toThrow("Invalid session warning severity");
   });
 
-  it("parses workspace effective upload config when present", () => {
+  it("parses workspace effective upload config without retaining the removed top-level branch alias", () => {
+    const workspace = parseWorkspace({
+      id: "w1",
+      projectId: "p1",
+      path: "/repo",
+      label: "main",
+      branch: "legacy-wire-alias",
+      isMain: true,
+      effectiveConfig: { uploads: { defaultFolder: "manual/uploads" } },
+    });
+
+    expect(workspace).toEqual({
+      id: "w1",
+      projectId: "p1",
+      path: "/repo",
+      label: "main",
+      isMain: true,
+      effectiveConfig: { uploads: { defaultFolder: "manual/uploads" } },
+    });
+    expect(workspace).not.toHaveProperty("branch");
+  });
+
+  it("parses generic workspace provider and removal metadata", () => {
     expect(parseWorkspace({
       id: "w1",
       projectId: "p1",
-      path: "/repo",
-      label: "main",
-      branch: "main",
-      isMain: true,
-      isGitRepo: true,
-      isGitWorktree: false,
-      effectiveConfig: { uploads: { defaultFolder: "manual/uploads" } },
+      path: "/repo/secondary",
+      label: "secondary",
+      isMain: false,
+      provider: {
+        pluginId: "workspace-provider",
+        capabilities: { request: true, remove: true },
+        metadata: { changeId: "abc", nested: [1, true, null] },
+      },
+      removal: { actionLabel: "Remove workspace", confirmation: "Remove secondary?", precondition: "v1.confirmed" },
+      effectiveConfig: {},
     })).toEqual({
+      id: "w1",
+      projectId: "p1",
+      path: "/repo/secondary",
+      label: "secondary",
+      isMain: false,
+      provider: {
+        pluginId: "workspace-provider",
+        capabilities: { request: true, remove: true },
+        metadata: { changeId: "abc", nested: [1, true, null] },
+      },
+      removal: { actionLabel: "Remove workspace", confirmation: "Remove secondary?", precondition: "v1.confirmed" },
+      effectiveConfig: {},
+    });
+  });
+
+  it("freezes host-owned workspace snapshots recursively", () => {
+    const workspace = parseWorkspace({
+      id: "w1",
+      projectId: "p1",
+      path: "/repo/secondary",
+      label: "secondary",
+      isMain: false,
+      provider: {
+        pluginId: "workspace-provider",
+        capabilities: { request: true, remove: true },
+        metadata: { nested: [{ ready: true }] },
+      },
+      removal: { actionLabel: "Remove workspace", confirmation: "Remove secondary?", precondition: "v1.confirmed" },
+      effectiveConfig: { uploads: { defaultFolder: "manual/uploads" } },
+    });
+    const nested = workspace.provider?.metadata?.["nested"];
+    if (!Array.isArray(nested)) throw new Error("Expected nested workspace metadata fixture");
+
+    expect(Object.isFrozen(workspace)).toBe(true);
+    expect(Object.isFrozen(workspace.provider)).toBe(true);
+    expect(Object.isFrozen(workspace.provider?.capabilities)).toBe(true);
+    expect(Object.isFrozen(workspace.provider?.metadata)).toBe(true);
+    expect(Object.isFrozen(nested)).toBe(true);
+    expect(Object.isFrozen(nested[0])).toBe(true);
+    expect(Object.isFrozen(workspace.removal)).toBe(true);
+    expect(Object.isFrozen(workspace.effectiveConfig)).toBe(true);
+    expect(Object.isFrozen(workspace.effectiveConfig.uploads)).toBe(true);
+  });
+
+  it("parses provider-neutral workspace resolution ownership and diagnostics", () => {
+    const resolution = parseWorkspaceProviderResolution({
+      status: "degraded",
+      projectId: "p1",
+      ownerPluginId: "replacement",
+      workspaces: [{
+        id: "w1",
+        projectId: "p1",
+        path: "/repo",
+        label: "main",
+        isMain: true,
+        effectiveConfig: {},
+      }],
+      diagnostics: [{
+        code: "claim-conflict",
+        message: "Two primary providers claimed the project",
+        tier: "primary",
+        pluginIds: ["one", "two"],
+      }],
+    });
+
+    expect(resolution).toEqual({
+      status: "degraded",
+      projectId: "p1",
+      ownerPluginId: "replacement",
+      workspaces: [expect.objectContaining({ id: "w1", projectId: "p1" })],
+      diagnostics: [{
+        code: "claim-conflict",
+        message: "Two primary providers claimed the project",
+        tier: "primary",
+        pluginIds: ["one", "two"],
+      }],
+    });
+    expect(Object.isFrozen(resolution)).toBe(true);
+    expect(Object.isFrozen(resolution.workspaces)).toBe(true);
+    expect(Object.isFrozen(resolution.diagnostics)).toBe(true);
+    expect(Object.isFrozen(resolution.diagnostics[0])).toBe(true);
+    expect(Object.isFrozen(resolution.diagnostics[0]?.pluginIds)).toBe(true);
+  });
+
+  it("rejects malformed workspace resolution ownership and diagnostics", () => {
+    const workspace = {
       id: "w1",
       projectId: "p1",
       path: "/repo",
       label: "main",
-      branch: "main",
       isMain: true,
-      isGitRepo: true,
-      isGitWorktree: false,
-      effectiveConfig: { uploads: { defaultFolder: "manual/uploads" } },
-    });
+      effectiveConfig: {},
+    };
+
+    expect(() => parseWorkspaceProviderResolution({
+      status: "provider",
+      projectId: "p1",
+      workspaces: [workspace],
+      diagnostics: [],
+    })).toThrow("missing ownerPluginId");
+    expect(() => parseWorkspaceProviderResolution({
+      status: "folder",
+      projectId: "p1",
+      workspaces: [workspace],
+      diagnostics: [{ code: "future", message: "bad", tier: "primary" }],
+    })).toThrow("diagnostic code");
+  });
+
+  it("rejects removal metadata without a host-issued precondition", () => {
+    expect(() => parseWorkspace({
+      id: "w1",
+      projectId: "p1",
+      path: "/repo/secondary",
+      label: "secondary",
+      isMain: false,
+      removal: { actionLabel: "Remove workspace", confirmation: "Remove secondary?" },
+      effectiveConfig: {},
+    })).toThrow("Expected string field: precondition");
+  });
+
+  it("rejects empty workspace removal wording", () => {
+    expect(() => parseWorkspace({
+      id: "w1",
+      projectId: "p1",
+      path: "/repo/secondary",
+      label: "secondary",
+      isMain: false,
+      removal: { actionLabel: "", confirmation: "Remove secondary?", precondition: "v1.confirmed" },
+      effectiveConfig: {},
+    })).toThrow("Expected non-empty string field: actionLabel");
+  });
+
+  it("rejects non-JSON workspace provider metadata", () => {
+    expect(() => parseWorkspace({
+      id: "w1",
+      projectId: "p1",
+      path: "/repo",
+      label: "main",
+      isMain: true,
+      provider: {
+        pluginId: "workspace-provider",
+        capabilities: { request: false, remove: false },
+        metadata: { invalid: undefined },
+      },
+      effectiveConfig: {},
+    })).toThrow("Invalid workspace provider metadata field");
   });
 
   it("rejects workspace responses without effective config", () => {
@@ -524,47 +783,12 @@ describe("API parsers", () => {
       path: "/repo",
       label: "main",
       isMain: true,
-      isGitRepo: false,
-      isGitWorktree: false,
     })).toThrow("Expected workspace effectiveConfig field");
-  });
-
-  it("parses workspace activity snapshots", () => {
-    expect(parseWorkspaceActivityResponse({
-      generatedAt: "now",
-      workspaces: [{ cwd: "/repo", hasSessionActivity: true, hasTerminalActivity: false, updatedAt: "later" }],
-    })).toEqual({
-      generatedAt: "now",
-      workspaces: [{ cwd: "/repo", hasSessionActivity: true, hasTerminalActivity: false, updatedAt: "later" }],
-    });
   });
 
   it("rejects invalid enum-like fields", () => {
     expect(() => parseSlashCommand({ name: "bad", source: "remote" })).toThrow("Invalid command source");
     expect(() => parseFileSuggestion({ path: "a", kind: "deleted" })).toThrow("Invalid file kind");
-    expect(() => parseGitStatusResponse({ isGitRepo: true, hash: "h", files: [{ path: "a", index: "weird", workingTree: "modified" }] })).toThrow("Invalid git file state");
-  });
-
-  it("parses submodule paths and pointer commit fields", () => {
-    const parsed = parseGitStatusResponse({
-      isGitRepo: true,
-      hash: "h",
-      branch: "main",
-      files: [
-        { path: "HARL", index: "unmodified", workingTree: "modified", submoduleFromCommit: "1111111", submoduleToCommit: "2222222" },
-        { path: "HARL/inner.txt", index: "modified", workingTree: "modified" },
-      ],
-      submodules: ["HARL"],
-    });
-    expect(parsed.submodules).toEqual(["HARL"]);
-    expect(parsed.files[0]?.submoduleFromCommit).toBe("1111111");
-    expect(parsed.files[0]?.submoduleToCommit).toBe("2222222");
-    expect(parsed.files[1]?.submoduleFromCommit).toBeUndefined();
-  });
-
-  it("defaults submodules to an empty list when absent", () => {
-    const parsed = parseGitStatusResponse({ isGitRepo: true, hash: "h", files: [] });
-    expect(parsed.submodules).toEqual([]);
   });
 
   it("validates file content responses", () => {
@@ -581,6 +805,9 @@ describe("API parsers", () => {
 
     expect(parseFileContentResponse(textFile)).toMatchObject({ path: "README.md", language: "markdown", content: "text" });
     expect(parseFileContentResponse({ ...textFile, path: "logo.png", mediaType: "image", mimeType: "image/png", content: "", binary: true })).toMatchObject({ path: "logo.png", mediaType: "image", mimeType: "image/png" });
+    expect(parseFileContentResponse({ ...textFile, path: "report.html", mediaType: "html", mimeType: "text/html; charset=utf-8", content: "<h1>literal</h1>", binary: false })).toMatchObject({ path: "report.html", mediaType: "html", content: "<h1>literal</h1>" });
+    expect(parseFileContentResponse({ ...textFile, path: "spec.pdf", mediaType: "pdf", mimeType: "application/pdf", content: "", binary: true })).toMatchObject({ path: "spec.pdf", mediaType: "pdf" });
+    expect(parseFileContentResponse({ ...textFile, mediaType: "markdown" })).toMatchObject({ path: "README.md", mediaType: "markdown", content: "text" });
 
     expect(() => parseFileContentResponse({ encoding: "base64" })).toThrow("Invalid file encoding");
     expect(() => parseFileContentResponse({ ...textFile, mediaType: "video" })).toThrow("Invalid file media type");
@@ -677,6 +904,30 @@ describe("API parsers", () => {
     expect(() => parseSessionTreeNavigateResult({ cancelled: false, summaryEntry: { raw: true } })).toThrow("summaryEntry");
     expect(() => parseSessionTreeNavigateResult({ cancelled: true, summaryEntry: { raw: true } })).toThrow("summaryEntry");
     expect(() => parseSessionTreeNavigateResult({ editorText: "missing discriminator" })).toThrow("cancelled");
+  });
+
+  it("strictly parses session tree fork results", () => {
+    const session = {
+      id: "forked-session",
+      path: "/sessions/forked-session.jsonl",
+      cwd: "/repo",
+      created: "2026-01-01T00:00:00.000Z",
+      modified: "2026-01-01T00:01:00.000Z",
+      messageCount: 2,
+      firstMessage: "original prompt",
+    };
+    expect(parseSessionTreeForkResult({ cancelled: false, session })).toEqual({ cancelled: false, session });
+    expect(parseSessionTreeForkResult({ cancelled: false, session, promptDraft: "resend me" })).toEqual({ cancelled: false, session, promptDraft: "resend me" });
+    expect(parseSessionTreeForkResult({ cancelled: true })).toEqual({ cancelled: true });
+    expect(parseSessionTreeForkResult({ cancelled: false, session, promptDraft: "resend me", operationId: "future-metadata" })).toEqual({ cancelled: false, session, promptDraft: "resend me" });
+    expect(parseSessionTreeForkResult({ cancelled: true, operationId: "future-metadata" })).toEqual({ cancelled: true });
+
+    expect(() => parseSessionTreeForkResult({ cancelled: false })).toThrow("Expected object response");
+    expect(() => parseSessionTreeForkResult({ cancelled: false, session: { ...session, id: 42 } })).toThrow("Expected string field: id");
+    expect(() => parseSessionTreeForkResult({ cancelled: false, session, promptDraft: 42 })).toThrow("promptDraft");
+    expect(() => parseSessionTreeForkResult({ cancelled: true, session })).toThrow("session");
+    expect(() => parseSessionTreeForkResult({ cancelled: true, promptDraft: "wrong branch" })).toThrow("promptDraft");
+    expect(() => parseSessionTreeForkResult({ session })).toThrow("cancelled");
   });
 
   it("strictly parses selected notification snapshots and realtime events", () => {

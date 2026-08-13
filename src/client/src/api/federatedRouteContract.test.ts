@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Workspace } from "../../../shared/apiTypes";
-import { FEDERATED_HTTP_ROUTES, FEDERATED_WEBSOCKET_ROUTES, SESSION_TREE_NAVIGATION_PROXY_TIMEOUT_MS, type FederatedHttpRouteSpec } from "../../../shared/federatedRoutes";
-import { activityApi, configApi, filesApi, gitApi, piPackagesApi, piWebApi, pluginsApi, projectsApi, sessionsApi, terminalsApi, workspacesApi } from "./clients";
+import { FEDERATED_HTTP_ROUTES, FEDERATED_WEBSOCKET_ROUTES, SESSION_TREE_FORK_PROXY_TIMEOUT_MS, PLUGIN_BACKEND_FEDERATION_TIMEOUT_MS, SESSION_TREE_NAVIGATION_PROXY_TIMEOUT_MS, WORKSPACE_FILE_PREVIEW_ROUTE_PATH, WORKSPACE_REMOVAL_FEDERATION_TIMEOUT_MS, type FederatedHttpRouteSpec } from "../../../shared/federatedRoutes";
+import { MAX_INLINE_PREVIEW_BYTES } from "../../../shared/workspaceFiles";
+import { PLUGIN_BACKEND_REQUEST_BODY_MAX_BYTES, PLUGIN_BACKEND_RESPONSE_BODY_MAX_BYTES } from "../../../shared/pluginBackendProtocol";
+import { configApi, filesApi, machineStatusApi, piPackagesApi, piWebApi, pluginsApi, projectsApi, sessionsApi, terminalsApi, workspacesApi } from "./clients";
 import { globalSessionEvents, realtimeEvents, sessionEvents, terminalSocket } from "./sockets";
-import { workspaceImagePreviewUrl } from "./urls";
+import { requestPluginBackend } from "./pluginBackends";
+import { workspaceFilePreviewUrl } from "./urls";
 
 const machineId = "remote-a";
 const workspace: Workspace = {
@@ -12,8 +15,6 @@ const workspace: Workspace = {
   path: "/repo",
   label: "repo",
   isMain: true,
-  isGitRepo: true,
-  isGitWorktree: true,
   effectiveConfig: {},
 };
 const session = { id: "s 1", cwd: workspace.path };
@@ -61,14 +62,50 @@ describe("federated route contract", () => {
     expect(FEDERATED_WEBSOCKET_ROUTES.some((path) => path.includes("unread"))).toBe(false);
   });
 
-  it("allowlists session tree navigation with a long model-operation timeout and no new WebSocket", () => {
+  it("allowlists session tree mutations with long model-operation timeouts and no new WebSocket", () => {
     expect(FEDERATED_HTTP_ROUTES.find((route) => route.path === "/sessions/:sessionId/tree/navigate")).toEqual({
       method: "POST",
       path: "/sessions/:sessionId/tree/navigate",
       timeoutMs: SESSION_TREE_NAVIGATION_PROXY_TIMEOUT_MS,
     });
+    expect(FEDERATED_HTTP_ROUTES.find((route) => route.path === "/sessions/:sessionId/tree/fork")).toEqual({
+      method: "POST",
+      path: "/sessions/:sessionId/tree/fork",
+      timeoutMs: SESSION_TREE_FORK_PROXY_TIMEOUT_MS,
+    });
     expect(SESSION_TREE_NAVIGATION_PROXY_TIMEOUT_MS).toBe(5 * 60_000);
+    expect(SESSION_TREE_FORK_PROXY_TIMEOUT_MS).toBe(5 * 60_000);
     expect(FEDERATED_WEBSOCKET_ROUTES.some((path) => path.includes("tree"))).toBe(false);
+  });
+
+  it("gives workspace removal a bounded cancellable federation hop", () => {
+    expect(FEDERATED_HTTP_ROUTES.find((route) => route.path === "/projects/:projectId/workspaces/:workspaceId")).toEqual({
+      method: "DELETE",
+      path: "/projects/:projectId/workspaces/:workspaceId",
+      timeoutMs: WORKSPACE_REMOVAL_FEDERATION_TIMEOUT_MS,
+      propagateCancellation: true,
+    });
+  });
+
+  it("gives workspace file previews the inline byte bound and a cancellable hop", () => {
+    expect(FEDERATED_HTTP_ROUTES.find((route) => route.path === WORKSPACE_FILE_PREVIEW_ROUTE_PATH)).toEqual({
+      method: "GET",
+      path: WORKSPACE_FILE_PREVIEW_ROUTE_PATH,
+      responseBodyLimit: MAX_INLINE_PREVIEW_BYTES,
+      propagateCancellation: true,
+    });
+    expect(FEDERATED_WEBSOCKET_ROUTES.some((path) => path.includes("preview"))).toBe(false);
+  });
+
+  it("allowlists exactly one bounded workspace provider backend route", () => {
+    expect(FEDERATED_HTTP_ROUTES.filter((route) => route.path.includes("plugin-backends"))).toEqual([{
+      method: "POST",
+      path: "/plugin-backends/:pluginId/projects/:projectId/workspaces/:workspaceId/:operation",
+      timeoutMs: PLUGIN_BACKEND_FEDERATION_TIMEOUT_MS,
+      bodyLimit: PLUGIN_BACKEND_REQUEST_BODY_MAX_BYTES,
+      responseBodyLimit: PLUGIN_BACKEND_RESPONSE_BODY_MAX_BYTES,
+    }]);
+    expect(FEDERATED_WEBSOCKET_ROUTES.some((path) => path.includes("plugin-backends"))).toBe(false);
   });
 
   it("covers machine-scoped client HTTP calls with remote proxy routes", async () => {
@@ -85,21 +122,20 @@ describe("federated route contract", () => {
       ignoreParseFailure(piPackagesApi.install("npm:@acme/tools", machineId)),
       ignoreParseFailure(piPackagesApi.remove("npm:@acme/tools", "user", machineId)),
       ignoreParseFailure(piPackagesApi.update("npm:@acme/tools", machineId)),
-      ignoreParseFailure(activityApi.workspaceActivity(machineId)),
+      ignoreParseFailure(machineStatusApi.machineStatus(machineId)),
       ignoreParseFailure(projectsApi.projects(machineId)),
       ignoreParseFailure(projectsApi.addProject("/repo", "Repo", false, machineId)),
       ignoreParseFailure(projectsApi.closeProject("p 1", machineId)),
       ignoreParseFailure(projectsApi.projectDirectories("/r", machineId)),
       ignoreParseFailure(workspacesApi.workspaces("p 1", machineId)),
-      ignoreParseFailure(workspacesApi.deleteWorkspace("p 1", "w 1", machineId)),
+      ignoreParseFailure(workspacesApi.deleteWorkspace("p 1", "w 1", "v1.confirmed", machineId)),
       ignoreParseFailure(workspacesApi.workspaceTree("p 1", "w 1", "src", machineId)),
       ignoreParseFailure(workspacesApi.workspaceFile("p 1", "w 1", "README.md", machineId)),
       ignoreParseFailure(workspacesApi.writeWorkspaceFile("p 1", "w 1", "README.md", "hello", { overwrite: false }, machineId)),
       ignoreParseFailure(workspacesApi.deleteWorkspaceFile("p 1", "w 1", "README.md", machineId)),
       ignoreParseFailure(workspacesApi.moveWorkspaceFile("p 1", "w 1", "README.md", "docs/README.md", { overwrite: false }, machineId)),
+      ignoreParseFailure(requestPluginBackend({ pluginId: "board-tools", backendRevision: "server-r1", machineId, projectId: "p 1", workspaceId: "w 1" }, "cards.summary", { includeClosed: false })),
       ignoreParseFailure(filesApi.files("README", { kind: "tracked", mode: "file", projectId: "p 1", workspaceId: "w 1", machineId })),
-      ignoreParseFailure(gitApi.gitStatus("p 1", "w 1", machineId)),
-      ignoreParseFailure(gitApi.gitDiff("p 1", "w 1", { path: "README.md", staged: true }, machineId)),
       ignoreParseFailure(sessionsApi.sessions("/repo", machineId)),
       ignoreParseFailure(sessionsApi.unreadCatalog(machineId)),
       ignoreParseFailure(sessionsApi.acknowledgeUnread(session, "catalog-a", 7, machineId)),
@@ -130,6 +166,7 @@ describe("federated route contract", () => {
       ignoreParseFailure(sessionsApi.runCommand(session, "/help", machineId)),
       ignoreParseFailure(sessionsApi.respondToCommand(session, "req 1", "yes", machineId)),
       ignoreParseFailure(sessionsApi.navigateTree(session, { targetId: "entry-1", expectedLeafId: "leaf-1", summary: { mode: "none" } }, machineId)),
+      ignoreParseFailure(sessionsApi.forkTree(session, { entryId: "entry-1", expectedLeafId: "leaf-1" }, machineId)),
       ignoreParseFailure(sessionsApi.abort(session, machineId)),
       ignoreParseFailure(sessionsApi.stop(session, machineId)),
       ignoreParseFailure(sessionsApi.archive(session, machineId)),
@@ -157,7 +194,7 @@ describe("federated route contract", () => {
 
     const observedRoutes = uniqueHttpRoutes([
       ...fetchMock.mock.calls.map((call) => fetchCallToRoute(call, machineId)),
-      routeFromMachineUrl("GET", workspaceImagePreviewUrl("p 1", "w 1", "diagram.svg", { machineId, modifiedAt: "2026-05-25T00:00:00.000Z" }), machineId),
+      routeFromMachineUrl("GET", workspaceFilePreviewUrl("p 1", "w 1", "diagram.svg", { machineId, modifiedAt: "2026-05-25T00:00:00.000Z" }), machineId),
     ]);
     const unmatched = observedRoutes.filter((route) => !matchesHttpRoute(route, FEDERATED_HTTP_ROUTES));
 

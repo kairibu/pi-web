@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it } from "vitest";
-import type { Machine, MachineHealth, MachineStatus, WorkspaceActivity } from "../api";
+import type { Machine, MachineHealth, MachineStatus } from "../api";
+import type { MachineStatusSnapshot } from "../../../shared/machineStatus";
+import { machineStatusSnapshot } from "../machineStatus.testSupport";
 import { canRemoveMachine, MachineList } from "./MachineList";
 
 afterEach(() => {
@@ -15,11 +17,14 @@ describe("canRemoveMachine", () => {
   });
 });
 
-describe("machine unread indicator", () => {
-  it("shows an unread dot only on machines tracked as unread, including offline ones", async () => {
+describe("machine status indicator", () => {
+  it("shows an unread dot only on machines whose snapshot reports unread, including offline ones", async () => {
     const list = await mountMachineList(
       [machine("local", "local"), machine("remote-a", "remote"), machine("remote-b", "remote")],
-      new Set(["remote-a", "remote-b"]),
+      {
+        "remote-a": machineStatusSnapshot({ machine: { "core:unread": true } }),
+        "remote-b": machineStatusSnapshot({ machine: { "core:unread": true } }),
+      },
       { "remote-b": machineHealth("remote-b", "offline") },
     );
 
@@ -31,11 +36,11 @@ describe("machine unread indicator", () => {
     expect(unreadDot(rowFor(list, "remote-b"))).not.toBeNull();
   });
 
-  it("clears the dot once the machine is no longer tracked as unread", async () => {
-    const list = await mountMachineList([machine("local", "local")], new Set(["local"]));
+  it("clears the dot once a newer snapshot reports nothing unread", async () => {
+    const list = await mountMachineList([machine("local", "local")], { local: machineStatusSnapshot({ machine: { "core:unread": true } }) });
     expect(list.shadowRoot?.querySelector(".activity-indicator.unread")).not.toBeNull();
 
-    list.unreadMachineIds = new Set();
+    list.statusSnapshots = { local: machineStatusSnapshot({ revision: 2 }) };
     await list.updateComplete;
 
     expect(list.shadowRoot?.querySelector(".activity-indicator.unread")).toBeNull();
@@ -44,11 +49,9 @@ describe("machine unread indicator", () => {
   it("wraps the work dot in an unread ring when a machine is busy and unread", async () => {
     const list = await mountMachineList(
       [machine("local", "local"), machine("remote-a", "remote")],
-      new Set(["local", "remote-a"]),
-      {},
       {
-        local: { "/repo": workspaceActivity("/repo", true, false) },
-        "remote-a": { "/repo": workspaceActivity("/repo", false, true) },
+        local: machineStatusSnapshot({ machine: { "core:working": true, "core:unread": true } }),
+        "remote-a": machineStatusSnapshot({ machine: { "core:terminal": true, "core:unread": true } }),
       },
     );
 
@@ -63,19 +66,43 @@ describe("machine unread indicator", () => {
     // One mark per row: the ring replaces the standalone unread dot.
     expect(rowFor(list, "local").querySelector(".activity-indicator.unread")).toBeNull();
   });
+
+  it("shows no indicator at all for a machine that publishes no snapshot", async () => {
+    const list = await mountMachineList(
+      [machine("local", "local"), machine("remote-a", "remote")],
+      { "remote-a": machineStatusSnapshot({ machine: { "core:working": true } }) },
+    );
+
+    expect(rowFor(list, "local").querySelector(".activity-indicator")).toBeNull();
+    expect(rowFor(list, "remote-a").querySelector(".activity-indicator.session")).not.toBeNull();
+  });
+
+  it("still lights a row from a flag id this build does not know", async () => {
+    const list = await mountMachineList([machine("local", "local")], { local: machineStatusSnapshot({ machine: { "core:future": true } }) });
+
+    expect(rowFor(list, "local").querySelector(".activity-indicator.session")).not.toBeNull();
+  });
+
+  it("hides the work dot while a machine is unreachable", async () => {
+    const list = await mountMachineList(
+      [machine("remote-a", "remote")],
+      { "remote-a": machineStatusSnapshot({ machine: { "core:working": true } }) },
+      { "remote-a": machineHealth("remote-a", "offline") },
+    );
+
+    expect(rowFor(list, "remote-a").querySelector(".activity-indicator")).toBeNull();
+  });
 });
 
 async function mountMachineList(
   machines: Machine[],
-  unreadMachineIds: ReadonlySet<string>,
+  statusSnapshots: Record<string, MachineStatusSnapshot> = {},
   statuses: Record<string, MachineHealth> = {},
-  activities: Record<string, Record<string, WorkspaceActivity>> = {},
 ): Promise<MachineList> {
   const list = new MachineList();
   list.machines = machines;
-  list.unreadMachineIds = unreadMachineIds;
+  list.statusSnapshots = statusSnapshots;
   list.statuses = statuses;
-  list.activities = activities;
   document.body.append(list);
   await list.updateComplete;
   return list;
@@ -90,10 +117,6 @@ function rowFor(list: MachineList, machineName: string): Element {
 
 function unreadDot(row: Element): Element | null {
   return row.querySelector(".activity-indicator.unread");
-}
-
-function workspaceActivity(cwd: string, hasSessionActivity: boolean, hasTerminalActivity: boolean): WorkspaceActivity {
-  return { cwd, hasSessionActivity, hasTerminalActivity, updatedAt: "2026-06-04T00:00:00.000Z" };
 }
 
 function machine(id: string, kind: Machine["kind"]): Machine {

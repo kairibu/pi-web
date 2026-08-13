@@ -1,11 +1,14 @@
 import type { TemplateResult } from "lit";
-import type { FileContentResponse, FileTreeResponse, MachineKind, PiWebStatusResponse, TerminalCommandRunHandle, WriteWorkspaceFileOptions, WriteWorkspaceFileResponse, DeleteWorkspaceFileResponse, MoveWorkspaceFileOptions, MoveWorkspaceFileResponse } from "./shared/apiTypes.js";
+import type { DeleteWorkspaceFileResponse, FileContentResponse, FileTreeResponse, JsonValue, MachineKind, MoveWorkspaceFileOptions, MoveWorkspaceFileResponse, PiWebStatusResponse, TerminalCommandRunHandle, WorkspaceProviderMetadata, WorkspaceRemovalPresentation, WriteWorkspaceFileOptions, WriteWorkspaceFileResponse } from "./shared/pluginApiTypes.js";
 
 export type {
   FileContentMediaType,
   FileContentResponse,
   FileTreeEntry,
   FileTreeResponse,
+  JsonObject,
+  JsonPrimitive,
+  JsonValue,
   MachineKind,
   PiWebComponentStatus,
   PiWebDockerMode,
@@ -18,15 +21,17 @@ export type {
   PiWebStatusSeverity,
   PiWebVersionResponse,
   TerminalCommandRun,
-  TerminalCommandRunFilter,
   TerminalCommandRunHandle,
   TerminalCommandRunStatus,
+  WorkspaceProviderCapabilities,
+  WorkspaceProviderMetadata,
+  WorkspaceRemovalPresentation,
   WriteWorkspaceFileOptions,
   WriteWorkspaceFileResponse,
   DeleteWorkspaceFileResponse,
   MoveWorkspaceFileOptions,
   MoveWorkspaceFileResponse,
-} from "./shared/apiTypes.js";
+} from "./shared/pluginApiTypes.js";
 
 export type PluginId = string;
 export type LocalContributionId = string;
@@ -35,16 +40,20 @@ export type HtmlTemplateTag = (strings: TemplateStringsArray, ...values: unknown
 export type SvgTemplateTag = (strings: TemplateStringsArray, ...values: unknown[]) => TemplateResult;
 
 export interface PiWebPlugin {
-  apiVersion: 1;
+  apiVersion: 2;
   name: string;
   activate: (context: PluginActivationContext) => PluginActivationResult;
 }
 
+/** Host-owned frozen values supplied once during browser plugin activation. */
 export interface PluginActivationContext {
-  apiVersion: 1;
-  pluginId: PluginId;
-  html: HtmlTemplateTag;
-  svg: SvgTemplateTag;
+  readonly apiVersion: 2;
+  /** Stable package/source identity, including on federated machines. */
+  readonly pluginId: PluginId;
+  /** Host-unique identity for qualified contribution references in this runtime. */
+  readonly runtimePluginId: PluginId;
+  readonly html: HtmlTemplateTag;
+  readonly svg: SvgTemplateTag;
 }
 
 export interface PluginActivationResult {
@@ -99,7 +108,8 @@ export interface PluginRuntimeContext {
   selectWorkspaceTool: (tool: QualifiedContributionId) => void;
   openTerminal: (options?: { terminalId?: string | undefined }) => void;
   refreshFiles: () => void | Promise<void>;
-  refreshGit: () => void | Promise<void>;
+  /** Invalidate plugin workspace-panel data for the selected workspace, optionally targeting one qualified panel id. */
+  refreshWorkspacePanels: (panelId?: QualifiedContributionId) => void | Promise<void>;
   refreshAppData: () => void | Promise<void>;
   /** Force a fresh PI WEB release check on the selected machine. Optional for compatibility with older hosts. */
   checkForPiWebUpdates?: () => void | Promise<void>;
@@ -114,6 +124,8 @@ export interface PluginAction {
   title: string;
   description?: string;
   shortcut?: string;
+  /** Former qualified action ids whose saved shortcut preference should still apply. */
+  shortcutAliases?: QualifiedContributionId[];
   group?: string;
   enabled?: (context: PluginRuntimeContext) => boolean;
   /** Explain why a disabled action is visible but unavailable. */
@@ -121,15 +133,15 @@ export interface PluginAction {
   run: (context: PluginRuntimeContext) => void | Promise<void>;
 }
 
+/** Host-resolved workspace snapshot exposed to browser plugin callbacks. */
 export interface Workspace {
-  id: string;
-  projectId: string;
-  path: string;
-  label: string;
-  branch?: string;
-  isMain: boolean;
-  isGitRepo: boolean;
-  isGitWorktree: boolean;
+  readonly id: string;
+  readonly projectId: string;
+  readonly path: string;
+  readonly label: string;
+  readonly isMain: boolean;
+  readonly provider?: WorkspaceProviderMetadata;
+  readonly removal?: WorkspaceRemovalPresentation;
 }
 
 export interface WorkspaceFiles {
@@ -152,6 +164,11 @@ export interface WorkspaceFiles {
 
 export type WorkspacePanelFiles = WorkspaceFiles;
 
+/** JSON-only request path to the server module that currently owns this workspace. */
+export interface WorkspaceBackend {
+  request(operation: string, input: JsonValue): Promise<JsonValue>;
+}
+
 export interface WorkspaceHost {
   requestRender(): void;
 }
@@ -163,6 +180,8 @@ export interface WorkspaceContext {
   workspace: Workspace;
   state?: PluginRuntimeState;
   files: WorkspaceFiles;
+  /** Present only when this browser entry has a paired active server backend. */
+  backend?: WorkspaceBackend;
   host: WorkspaceHost;
 }
 
@@ -190,8 +209,12 @@ export interface WorkspacePanelContribution {
   title: string;
   icon?: WorkspacePanelIcon;
   order?: number;
+  /** Former URL tool/view values that should resolve to this panel. */
+  routeAliases?: string[];
   visible?: (context: WorkspacePanelContext) => boolean;
   badge?: (context: WorkspacePanelContext) => string | number | TemplateResult | undefined;
+  /** Called when the host invalidates workspace-panel data. */
+  onInvalidate?: (context: WorkspacePanelContext) => void | Promise<void>;
   render: (context: WorkspacePanelContext) => TemplateResult;
 }
 

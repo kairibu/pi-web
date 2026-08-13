@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import { smokeInstalledPluginApi } from "./plugin-api-package-smoke.mjs";
 
 const NPM_VERSION = "12.0.1";
 const MARKER = "pi-web-package-pty-ok";
@@ -29,8 +30,8 @@ try {
     mkdir(packDir, { recursive: true }),
     mkdir(join(globalPrefix, "lib"), { recursive: true }),
     mkdir(npmToolDir, { recursive: true }),
-    writeFile(join(npmToolDir, "package.json"), '{"private":true}\n'),
   ]);
+  await writeFile(join(npmToolDir, "package.json"), '{"private":true}\n');
 
   const packOutput = await runNpm(npmExecPath, ["pack", "--ignore-scripts", "--json", "--pack-destination", packDir], repoRoot);
   const tarballPath = join(packDir, packageTarballFilename(packOutput));
@@ -58,8 +59,9 @@ try {
   ], root);
 
   const packageRoot = join(globalPrefix, "lib", "node_modules", "@jmfederico", "pi-web");
+  await smokeInstalledPluginApi({ packageRoot, fixtureRoot: root, repoRoot });
   await smokeInstalledTerminalService(packageRoot);
-  console.log(`Installed-package PTY smoke test passed with npm ${NPM_VERSION}.`);
+  console.log(`Installed-package plugin API and PTY smoke tests passed with npm ${NPM_VERSION}.`);
 } finally {
   await rm(root, { recursive: true, force: true });
 }
@@ -75,11 +77,17 @@ async function runNpm(npmCliPath, args, cwd) {
 }
 
 function packageTarballFilename(output) {
-  const parsed = JSON.parse(output);
-  if (!Array.isArray(parsed) || parsed.length !== 1 || typeof parsed[0]?.filename !== "string") {
-    throw new Error("npm pack returned an unexpected result");
+  for (let jsonStart = output.indexOf("["); jsonStart >= 0; jsonStart = output.indexOf("[", jsonStart + 1)) {
+    try {
+      const parsed = JSON.parse(output.slice(jsonStart));
+      if (Array.isArray(parsed) && parsed.length === 1 && typeof parsed[0]?.filename === "string") {
+        return parsed[0].filename;
+      }
+    } catch {
+      // Lifecycle output can precede npm's JSON payload; keep looking for the payload.
+    }
   }
-  return parsed[0].filename;
+  throw new Error("npm pack returned an unexpected result");
 }
 
 async function smokeInstalledTerminalService(packageRoot) {

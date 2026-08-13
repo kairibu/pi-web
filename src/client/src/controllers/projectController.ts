@@ -4,12 +4,10 @@ import type { WorkspaceController } from "./workspaceController";
 
 export interface ProjectControllerDependencies {
   api?: Pick<typeof defaultApi, "projects" | "addProject" | "closeProject">;
-  onProjectsApplied?: (machineId: string) => void;
 }
 
 export class ProjectController {
   private readonly api: Pick<typeof defaultApi, "projects" | "addProject" | "closeProject">;
-  private readonly onProjectsApplied: ((machineId: string) => void) | undefined;
 
   constructor(
     private readonly getState: GetState,
@@ -18,7 +16,6 @@ export class ProjectController {
     deps: ProjectControllerDependencies = {},
   ) {
     this.api = deps.api ?? defaultApi;
-    this.onProjectsApplied = deps.onProjectsApplied;
   }
 
   async loadProjects() {
@@ -30,7 +27,6 @@ export class ProjectController {
       const projectIds = new Set(projects.map((project) => project.id));
       const workspacesByProjectId = Object.fromEntries(Object.entries(this.getState().workspacesByProjectId).filter(([projectId]) => projectIds.has(projectId)));
       this.setState({ projects, workspacesByProjectId });
-      this.onProjectsApplied?.(machineId);
     } catch (error) {
       if (selectedMachineId(this.getState()) === machineId) this.setState({ error: String(error) });
     } finally {
@@ -46,7 +42,6 @@ export class ProjectController {
       if (selectedMachineId(this.getState()) !== machineId) return;
       const projects = this.getState().projects;
       this.setState({ projects: [...projects.filter((p) => p.id !== project.id), project], projectDialogOpen: false });
-      this.onProjectsApplied?.(machineId);
       await this.workspaces.selectProject(project);
     } catch (error) {
       if (selectedMachineId(this.getState()) === machineId) this.setState({ error: String(error) });
@@ -61,7 +56,6 @@ export class ProjectController {
       this.workspaces.forgetProject(projectId);
       const state = this.getState();
       this.setState({ projects: state.projects.filter((p) => p.id !== projectId) });
-      this.onProjectsApplied?.(machineId);
       if (state.selectedProject?.id === projectId) this.workspaces.clearSelection();
     } catch (error) {
       if (selectedMachineId(this.getState()) === machineId) this.setState({ error: String(error) });

@@ -16,14 +16,21 @@ export type SpawnSubsessionModel = NonNullable<ExtensionContext["model"]>;
 export type SpawnSubsessionThinkingLevel = NonNullable<ExtensionContext["thinkingLevel"]>;
 
 export interface SpawnSubsessionInvocation {
-  /** cwd of the session that invoked the tool (used for project-scope checks). */
+  /**
+   * cwd of the session that invoked the tool. A tracked child always runs in
+   * this workspace, so it is both the project-scope check input and the target.
+   */
   spawningCwd: string;
   /** Session id of the parent; the spawned session is tracked against it. */
   parentSessionId: string;
   /** Session file of the parent, recorded in the child's `parentSession` header. */
   parentSessionFile: string | undefined;
   prompt: string;
-  cwd: string | undefined;
+  /**
+   * Requested target workspace. The tool never sets it; other callers may, and
+   * anything other than {@link spawningCwd} is refused rather than retargeted.
+   */
+  cwd?: string;
   /** Current model from the dispatching session, used as the spawned session's default. */
   model?: SpawnSubsessionModel;
   /** Strict `provider/model-id` requested by the parent; overrides {@link model} when set. */
@@ -76,9 +83,6 @@ const SpawnSubsessionParams = Type.Object({
   prompt: Type.String({
     description: "Initial instruction for the tracked child.",
   }),
-  cwd: Type.Optional(Type.String({
-    description: "Child workspace in the same project (worktree or root); defaults to the parent's directory.",
-  })),
   model: Type.Optional(Type.String({
     description: 'Model for the child session, as an exact "provider/model-id" such as "anthropic/claude-sonnet-4-5". When the user references a model as #provider/model-id in their request, forward it here. An unknown value is rejected. Omit to inherit this session\'s model.',
   })),
@@ -186,16 +190,16 @@ function renderTranscript(result: SubsessionReadResult): string {
  *
  * A subsession records its parent in its session header, the parent is notified
  * when it stops working, and the parent may read its transcript/result. The
- * tools are constructed per-session, carrying the spawning cwd for
- * project-scope validation; the parent's identity is taken from the live
- * extension context at call time.
+ * tools are constructed per-session, carrying the spawning cwd, which is both
+ * the project-scope validation input and the child's workspace; the parent's
+ * identity is taken from the live extension context at call time.
  */
 export function createSubsessionToolDefinitions(spawningCwd: string, deps: SubsessionToolDeps) {
   const spawnTool = defineTool<typeof SpawnSubsessionParams, SpawnSubsessionResult>({
     name: "spawn_subsession",
     label: "Spawn subsession",
-    description: "Start a tracked child session to carry out part of the current task and return immediately. Its transcript and result are available here after it finishes.",
-    promptSnippet: "spawn_subsession: tracked child work for the current task; result available after completion",
+    description: "Start a tracked child session in this session's working directory to carry out part of the current task and return immediately. Its transcript and result are available here after it finishes.",
+    promptSnippet: "spawn_subsession: tracked child work in this workspace; result available after completion",
     parameters: SpawnSubsessionParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const parentSessionId = ctx.sessionManager.getSessionId();
@@ -205,7 +209,6 @@ export function createSubsessionToolDefinitions(spawningCwd: string, deps: Subse
         parentSessionId,
         parentSessionFile,
         prompt: params.prompt,
-        cwd: params.cwd,
         ...(ctx.model === undefined ? {} : { model: ctx.model }),
         ...(params.model === undefined ? {} : { modelSpec: params.model }),
         ...(ctx.thinkingLevel === undefined ? {} : { thinkingLevel: ctx.thinkingLevel }),

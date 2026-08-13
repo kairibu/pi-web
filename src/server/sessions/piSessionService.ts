@@ -14,13 +14,14 @@ import {
   type AgentSessionRuntimeDiagnostic,
   type AgentSessionServices,
   type CreateAgentSessionRuntimeFactory,
+  type CreateAgentSessionServicesOptions,
   type EditToolDetails,
   type ExtensionUIDialogOptions,
   type ExtensionUIContext,
   type ModelRuntime,
   type ResourceDiagnostic,
 } from "@earendil-works/pi-coding-agent";
-import type { ClientArchiveSessionsResponse, ClientCommand, ClientCommandResult, ClientMessagePage, ClientSession, ClientSessionCleanupExecuteResponse, ClientSessionCleanupPreviewResponse, ClientSessionModel, ClientSessionStatus, ClientSessionTreeNavigateRequest, ClientSessionTreeNavigateResult, ClientThinkingLevel, SessionStreamSnapshot, SessionUiEvent } from "../types.js";
+import type { ClientArchiveSessionsResponse, ClientCommand, ClientCommandResult, ClientMessagePage, ClientSession, ClientSessionCleanupExecuteResponse, ClientSessionCleanupPreviewResponse, ClientSessionModel, ClientSessionStatus, ClientSessionTreeForkRequest, ClientSessionTreeForkResult, ClientSessionTreeNavigateRequest, ClientSessionTreeNavigateResult, ClientThinkingLevel, SessionStreamSnapshot, SessionUiEvent } from "../types.js";
 import { projectBrowserMessage } from "../browserMessageProjection.js";
 import { pageMessagesAtSafeBoundary } from "./messagePaging.js";
 import type { SessionEventHub } from "../realtime/sessionEventHub.js";
@@ -61,9 +62,7 @@ import type { SessionRouteRef, SessionRouteService } from "./sessionService.js";
 
 import { type AuthChange } from "./authService.js";
 import { canonicalizeStoredCwd, cwdPathsEqual } from "../workingDirectory.js";
-import { readSessionHeaderSummary, type SessionHeaderSummary } from "./sessionFileHeader.js";
-import { countOutOfListingChildren, locateOutOfListingParents, type SessionHeaderReader } from "./parentSessionLocator.js";
-import { siblingWorkspaceCwds, type ProjectWorkspaceCwds } from "../workspaces/projectWorkspaceCwds.js";
+import { readSessionHeaderSummary } from "./sessionFileHeader.js";
 import type { WorkspaceActivityService } from "../activity/workspaceActivityService.js";
 import { createAskUserToolDefinition, type AskUserInvocation, type AskUserToolDeps } from "./askUserTool.js";
 import { PendingAskStore, renderAskUserAnswersText, type PendingAskCloseResult, type PendingAskOpenResult } from "./pendingAskStore.js";
@@ -118,6 +117,15 @@ function noop(): void {
 function spawnTargetError(decision: Extract<SpawnTargetDecision, { allowed: false }>): Error {
   if (decision.reason === "not-registered") return new Error("Spawning session is not in a registered project");
   return new Error(`cwd must be a workspace of this project. Allowed: ${decision.allowedCwds.join(", ")}`);
+}
+
+/**
+ * Tracked subsessions are worktree-scoped, so a requested target other than the
+ * parent's own cwd fails closed instead of being silently retargeted. The
+ * message names the rule and both supported ways to get work done elsewhere.
+ */
+function subsessionCwdError(spawningCwd: string, requestedCwd: string): Error {
+  return new Error(`A tracked subsession runs in this session's working directory (${spawningCwd}); ${requestedCwd} was requested. Instruct the child to work elsewhere from this workspace, or use spawn_session for an independent session in another workspace.`);
 }
 
 function modelSpecOf(model: { provider: string; id: string }): string {
@@ -276,11 +284,25 @@ export interface PiSessionListEntry {
   cwd: string;
   created: Date;
   modified: Date;
+  /**
+   * Number of `message` entries in the transcript. The streaming summary
+   * scanner counts message lines by their leading bytes and a trailing `}`
+   * without validating the JSON, so a final write read mid-flight can add a
+   * transient +1; the count self-heals on the next listing once the line
+   * completes.
+   */
   messageCount: number;
   firstMessage: string;
   allMessagesText: string;
   name?: string;
   parentSessionPath?: string;
+}
+
+/** A session file located by id without parsing its transcript. */
+export interface ResolvedSessionFile {
+  id: string;
+  cwd: string;
+  path: string;
 }
 
 interface WorkspaceArchiveCandidate extends SessionArchiveTreeCandidate {
@@ -317,11 +339,25 @@ export interface PiSessionManager {
 
 export interface PiSessionManagerGateway {
   list(cwd: string): Promise<PiSessionListEntry[]>;
+  /**
+   * Locate a session file by id, with an exact header id taking priority over
+   * a prefix, without parsing message bodies or building a full workspace
+   * transcript listing.
+   */
+  resolveSessionFile(cwd: string, sessionId: string): Promise<ResolvedSessionFile | undefined>;
+  /**
+   * Drop any cached listing summary for a session file that was rewritten in
+   * place (detach clears the header while keeping the inode): file identity
+   * and size checks cannot detect such rewrites, so the scanner memo must be
+   * told explicitly.
+   */
+  invalidateSessionFile(sessionFile: string): void;
   create(cwd: string, options?: { parentSession?: string }): PiSessionManager;
   /**
    * Cross-project listing of Pi's session stores (the default store plus any
    * env-configured session dir). Session cleanup scans every project at once;
-   * per-session lookups use the cwd-scoped `list` instead.
+   * cwd-scoped UI listings use `list`, while direct named lookups use
+   * `resolveSessionFile`.
    */
   listAll(): Promise<PiSessionListEntry[]>;
   open(path: string): PiSessionManager;
@@ -674,15 +710,37 @@ export function createPiWebCustomToolDefinitions(
   ];
 }
 
+/**
+ * Resource-loader options that append PI WEB's own system-prompt sections.
+ *
+ * `appendSystemPromptOverride` composes with what the loader already resolved,
+ * so the operator's `SYSTEM.md` / `APPEND_SYSTEM.md` files keep their content
+ * and PI WEB's sections land after them. Returns `undefined` when there is
+ * nothing to add, leaving the loader exactly as pi configures it.
+ */
+export function piWebResourceLoaderOptions(
+  appendSystemPromptSections: readonly string[],
+): CreateAgentSessionServicesOptions["resourceLoaderOptions"] | undefined {
+  if (appendSystemPromptSections.length === 0) return undefined;
+  return { appendSystemPromptOverride: (base) => [...base, ...appendSystemPromptSections] };
+}
+
 function createDefaultRuntimeFactory(
   modelRuntime: ModelRuntime,
   sessionManagers: Pick<PiSessionManagerGateway, "open">,
   spawn?: SpawnSessionFn,
   subsessions?: SubsessionToolDeps,
   askUser?: AskUserToolDeps,
+  appendSystemPromptSections: readonly string[] = [],
 ): PiWebCreateAgentSessionRuntimeFactory {
+  const resourceLoaderOptions = piWebResourceLoaderOptions(appendSystemPromptSections);
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled }) => {
-    const services: AgentSessionServices = await createAgentSessionServices({ cwd, agentDir, modelRuntime });
+    const services: AgentSessionServices = await createAgentSessionServices({
+      cwd,
+      agentDir,
+      modelRuntime,
+      ...(resourceLoaderOptions === undefined ? {} : { resourceLoaderOptions }),
+    });
     const resolvedDelegationToolsEnabled = delegationToolsEnabled
       ?? await sessionAllowsDelegationTools(sessionManager, sessionManagers);
     const customTools = createPiWebCustomToolDefinitions(cwd, resolvedDelegationToolsEnabled, spawn, subsessions, askUser);
@@ -738,17 +796,9 @@ export interface PiSessionServiceDependencies {
    */
   spawnTargets?: SpawnTargetResolver;
   /**
-   * When provided, session listings report related sessions living in sibling
-   * workspaces of the same project: where an out-of-workspace parent is, and how
-   * many children a listed session has elsewhere. Omit to list each workspace in
-   * isolation.
-   */
-  projectWorkspaces?: ProjectWorkspaceCwds;
-  /**
-   * Beta: when true (and `spawnTargets` is provided), the tracked-subsession
+   * When true (and `spawnTargets` is provided), the tracked-subsession
    * tools are available to sessions whose creation provenance permits
-   * delegation. Off by default so the capability can ship in main without
-   * being exposed in releases.
+   * delegation. On by default; the operator opts out via config or environment.
    */
   subsessionsEnabled?: boolean;
   /**
@@ -757,6 +807,12 @@ export interface PiSessionServiceDependencies {
    * questions reach the user of the asking session, not another session.
    */
   askUserEnabled?: boolean;
+  /**
+   * Deployment facts appended to every session's system prompt, after the
+   * operator's own pi prompt files. Empty in ordinary installs; sessiond fills
+   * it with container environment facts in Docker deployments.
+   */
+  appendSystemPromptSections?: readonly string[];
   /** Daemon-lifetime open-ask state; defaults to an in-memory store in tests. */
   pendingAskStore?: PendingAskStore;
   /** Daemon-lifetime open-dialog state; defaults to an in-memory store in tests. */
@@ -777,6 +833,11 @@ export interface PiSessionServiceDependencies {
   unreadStore?: SessionUnreadStore;
   /** Initial retry delay for durable unread publication failures. */
   unreadPublicationRetryDelayMs?: number;
+  /**
+   * Called when unread state changed, so the machine status projection can
+   * recompute. The unread catalog itself stays the authority for unread detail.
+   */
+  onUnreadChanged?: () => void;
   /**
    * Lets session startup report that provider model lists are refreshing while
    * a session is being constructed. Omit to report the startup phase alone.
@@ -818,8 +879,6 @@ export class PiSessionService implements SessionRouteService {
   private readonly subsessionLinks = new Map<string, TrackedSubsessionLink>();
   /** Parent id/file identities whose persisted links have already been loaded. */
   private readonly subsessionHydratedParents = new Set<string>();
-  /** Session file path -> its parsed header. Headers are written once, so successful reads are cached. */
-  private readonly sessionHeaderCache = new Map<string, SessionHeaderSummary>();
   /**
    * Tracked subsession id -> whether a completion notification is armed.
    * Armed when the child starts working; firing on completion disarms it so a
@@ -834,7 +893,6 @@ export class PiSessionService implements SessionRouteService {
   private readonly modelRuntime: ModelRuntime;
   private readonly workspaceActivity: Pick<WorkspaceActivityService, "applySessionStatus" | "applySessionActivity" | "removeSession" | "reconcileSessionActivity"> | undefined;
   private readonly spawnTargets: SpawnTargetResolver | undefined;
-  private readonly projectWorkspaces: ProjectWorkspaceCwds | undefined;
   private readonly logger: PiSessionLogger;
   private readonly now: () => Date;
   private readonly notificationStore: SessionNotificationStore;
@@ -847,6 +905,7 @@ export class PiSessionService implements SessionRouteService {
   private readonly dialogWaiters = new ExtensionDialogWaiters();
   private readonly catalogRefreshStatus: CatalogRefreshStatus | undefined;
   private readonly unreadPublicationRetryInitialMs: number;
+  private readonly onUnreadChanged: (() => void) | undefined;
   private readonly pendingUnreadMutations: SessionUnreadMutation[] = [];
   private unreadPublication: Promise<void> | undefined;
   private unreadPublicationFailure: unknown;
@@ -861,11 +920,11 @@ export class PiSessionService implements SessionRouteService {
     this.sessionManager = deps.sessionManager;
     this.modelRuntime = deps.modelRuntime;
     this.spawnTargets = deps.spawnTargets;
-    this.projectWorkspaces = deps.projectWorkspaces;
     this.logger = deps.logger ?? noopLogger;
     this.now = deps.now ?? (() => new Date());
     this.notificationStore = deps.notificationStore ?? new SessionNotificationStore();
     this.unreadStore = deps.unreadStore ?? new SessionUnreadStore();
+    this.onUnreadChanged = deps.onUnreadChanged;
     this.pendingAskStore = deps.pendingAskStore ?? new PendingAskStore();
     this.pendingExtensionDialogStore = deps.pendingExtensionDialogStore ?? new PendingExtensionDialogStore();
     this.extensionDialogsTimeoutMs = deps.extensionDialogsTimeoutMs ?? DEFAULT_EXTENSION_DIALOGS_TIMEOUT_MS;
@@ -875,7 +934,7 @@ export class PiSessionService implements SessionRouteService {
       deps.unreadPublicationRetryDelayMs ?? DEFAULT_UNREAD_PUBLICATION_RETRY_MS,
     );
     this.unreadPublicationRetryDelayMs = this.unreadPublicationRetryInitialMs;
-    // Subsessions are a beta capability gated behind their own flag, and they
+    // Subsessions are gated behind their own flag, and they
     // also require the spawn capability (they share its project-scope resolver).
     const subsessionsActive = this.spawnTargets !== undefined && deps.subsessionsEnabled === true;
     this.createRuntime = deps.createRuntime ?? createDefaultRuntimeFactory(
@@ -889,6 +948,7 @@ export class PiSessionService implements SessionRouteService {
         read: (parentSessionId, sessionId, query, parentSessionFile) => this.readSubsession(parentSessionId, sessionId, query, parentSessionFile),
       },
       deps.askUserEnabled === true ? { open: (input) => this.openAsk(input) } : undefined,
+      deps.appendSystemPromptSections ?? [],
     );
     this.createAgentRuntime = deps.createAgentRuntime ?? defaultCreateAgentRuntime;
     this.workspaceActivity = deps.workspaceActivity;
@@ -1054,7 +1114,6 @@ export class PiSessionService implements SessionRouteService {
     this.subsessionLinks.clear();
     this.subsessionHydratedParents.clear();
     this.subsessionNotifyArmed.clear();
-    this.sessionHeaderCache.clear();
     this.notificationStore.clearAll("service-dispose");
     await Promise.all(activeSessions.map(async (active) => {
       active.unsubscribe();
@@ -1085,77 +1144,8 @@ export class PiSessionService implements SessionRouteService {
       .sort(compareArchivedRecords)
       .map((record) => clientSessionFromArchivedRecord(record, sessionsById.get(record.sessionId)))
       .filter(isDefined);
-    return await this.withRelatedSessionsElsewhere([...unarchivedSessions, ...archivedSessions], cwd);
+    return [...unarchivedSessions, ...archivedSessions];
   }
-
-  /**
-   * Annotate a listing with the session relationships that cross workspace
-   * boundaries: where an out-of-listing parent lives, and how many children a
-   * listed session has in sibling workspaces.
-   *
-   * Both directions are best-effort. An unreadable parent header or a sibling
-   * workspace that cannot be listed leaves the session unannotated rather than
-   * failing the listing, and the browser falls back to its generic states.
-   */
-  private async withRelatedSessionsElsewhere(sessions: readonly ClientSession[], cwd: string): Promise<ClientSession[]> {
-    const [parentLocations, childCounts] = await Promise.all([
-      locateOutOfListingParents(sessions, cwd, this.readCachedSessionHeader),
-      this.countChildrenInSiblingWorkspaces(sessions, cwd),
-    ]);
-    return sessions.map((session) => {
-      const parent = session.parentSessionPath === undefined ? undefined : parentLocations.get(session.parentSessionPath);
-      const childrenElsewhere = childCounts.get(session.path);
-      if (parent === undefined && childrenElsewhere === undefined) return session;
-      const annotated = { ...session };
-      if (parent !== undefined) {
-        annotated.parentSessionId = parent.parentSessionId;
-        annotated.parentSessionCwd = parent.parentSessionCwd;
-      }
-      if (childrenElsewhere !== undefined) annotated.childSessionsElsewhere = childrenElsewhere;
-      return annotated;
-    });
-  }
-
-  /**
-   * Count children of the listed sessions that live in other workspaces of the
-   * same project.
-   *
-   * Only sibling workspaces are scanned: agents may only spawn into workspaces
-   * of the spawning session's own project, so that bounds where a child can be.
-   * Listing is skipped entirely when no project-workspace locator is configured
-   * or the cwd belongs to no registered project.
-   */
-  private async countChildrenInSiblingWorkspaces(sessions: readonly ClientSession[], cwd: string): Promise<Map<string, number>> {
-    if (this.projectWorkspaces === undefined || sessions.length === 0) return new Map();
-    try {
-      const siblingCwds = await siblingWorkspaceCwds(this.projectWorkspaces, cwd);
-      if (siblingCwds.length === 0) return new Map();
-      const listings = await Promise.all(siblingCwds.map(async (siblingCwd): Promise<string[]> => {
-        const entries = await this.sessionManager.list(siblingCwd);
-        return entries.flatMap((entry) => entry.parentSessionPath === undefined ? [] : [entry.parentSessionPath]);
-      }));
-      return countOutOfListingChildren(sessions, listings.flat());
-    } catch (error: unknown) {
-      this.logger.info(
-        { cwd, error: error instanceof Error ? error.message : String(error) },
-        "failed to count child sessions in sibling workspaces",
-      );
-      return new Map();
-    }
-  }
-
-  /**
-   * Read a session file header, memoized per path. Pi writes the header once at
-   * session creation, so a successful read stays valid for the process lifetime;
-   * failures are not cached so a session file that appears later is picked up.
-   */
-  private readonly readCachedSessionHeader: SessionHeaderReader = async (sessionFile) => {
-    const cached = this.sessionHeaderCache.get(sessionFile);
-    if (cached !== undefined) return cached;
-    const header = await readSessionHeaderSummary(sessionFile);
-    if (header !== undefined) this.sessionHeaderCache.set(sessionFile, header);
-    return header;
-  };
 
   async start(cwd: string, options: StartSessionOptions = {}): Promise<ClientSession> {
     return this.startSession(cwd, options);
@@ -1225,14 +1215,21 @@ export class PiSessionService implements SessionRouteService {
   }
 
   /**
-   * Start a *tracked* child session on behalf of a LLM. Identical to
-   * {@link spawnSession} in how the target cwd is resolved, but the child
-   * records its parent (so it shows in the session tree) and is registered so
-   * the parent is notified when it stops working and can inspect it later.
+   * Start a *tracked* child session on behalf of a LLM. Unlike
+   * {@link spawnSession}, a tracked child always runs in the parent's own
+   * workspace: parent/child trees are worktree-scoped, so a child elsewhere
+   * would be invisible to the parent's listing. The child records its parent
+   * (so it shows in the session tree) and is registered so the parent is
+   * notified when it stops working and can inspect it later.
    */
   async spawnSubsession(input: SpawnSubsessionInvocation): Promise<SpawnSubsessionResult> {
     if (this.spawnTargets === undefined) throw new Error("Spawning sessions is disabled");
-    const decision = await this.spawnTargets.resolveSpawnTarget(input.spawningCwd, input.cwd);
+    if (input.cwd !== undefined && input.cwd !== "" && !cwdPathsEqual(input.cwd, input.spawningCwd)) {
+      throw subsessionCwdError(input.spawningCwd, input.cwd);
+    }
+    // Resolved against the parent's own cwd only: this still refuses spawning
+    // from an unregistered directory, which keeps the child visible in the UI.
+    const decision = await this.spawnTargets.resolveSpawnTarget(input.spawningCwd, undefined);
     if (!decision.allowed) throw spawnTargetError(decision);
     // A model spec overrides the inherited model and is resolved against the
     // parent's model runtime; only a spec resolves against the parent.
@@ -1272,10 +1269,12 @@ export class PiSessionService implements SessionRouteService {
   /**
    * The models a session may pick from: its scoped set when model-scoped,
    * otherwise the runtime's available snapshot. Refreshes the runtime catalog
-   * first so callers see newly configured providers and models.
+   * first so callers see newly configured providers and models. The refresh
+   * stays local (`allowNetwork: false`); network refreshes belong to the
+   * bounded background catalog refresher, not this request path.
    */
   private async sessionModelCandidates(session: PiAgentSession): Promise<readonly AgentModel[]> {
-    await session.modelRuntime.refresh();
+    await session.modelRuntime.refresh({ allowNetwork: false });
     return session.scopedModels.length > 0
       ? session.scopedModels.map((scoped) => scoped.model)
       : session.modelRuntime.getAvailableSnapshot();
@@ -2136,6 +2135,81 @@ export class PiSessionService implements SessionRouteService {
     }
   }
 
+  /**
+   * Fork the session from one entry of its tree into a new session file,
+   * leaving the original session untouched. The forked runtime replaces the
+   * current one, so the outcome is reported for the session the client is
+   * about to join rather than the forked-from record.
+   */
+  async forkFromTree(ref: PiSessionRef, request: ClientSessionTreeForkRequest): Promise<ClientSessionTreeForkResult> {
+    if (request.entryId.trim() === "") throw new Error("Session tree entry is required");
+    if (this.isTreeExclusiveSessionIdentityActive(ref.id)) {
+      throw new Error("Stop current session activity before forking the session tree");
+    }
+    await this.assertWritable(ref);
+    const session = await this.getOrOpen(ref);
+    if (this.hasActiveWork(session)) throw new Error("Stop current session activity before forking the session tree");
+    if (session.sessionManager.getLeafId() !== request.expectedLeafId) {
+      throw new Error("The session changed since /tree was opened. Reopen /tree and try again.");
+    }
+
+    this.publishActivity(session, "forking session from entry", "active");
+    this.publishStatus(session);
+    try {
+      const result = await this.commandService.forkEntry(session.sessionId, request.entryId, {
+        expectedLeafId: request.expectedLeafId,
+      });
+      if (result.type === "unsupported") throw new Error(result.message);
+      if (result.type !== "done") throw new Error("Session fork is unavailable");
+      if (result.session === undefined) {
+        if (this.isCurrentActiveSession(session)) {
+          this.publishActivity(session, "fork cancelled", "idle");
+          this.publishStatus(session);
+        }
+        return { cancelled: true };
+      }
+
+      const forkedSession = this.active.get(result.session.id)?.runtime.session;
+      if (forkedSession !== undefined && this.isCurrentActiveSession(forkedSession)) {
+        this.publishActivity(forkedSession, "session forked", "idle");
+        this.publishStatus(forkedSession);
+      }
+      if (result.session.id !== session.sessionId) this.clearSupersededSessionActivity(session);
+      return {
+        cancelled: false,
+        session: result.session,
+        ...(result.promptDraft === undefined ? {} : { promptDraft: result.promptDraft }),
+      };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (this.isCurrentActiveSession(session)) {
+        this.publishActivity(session, "fork failed", "error", message);
+        this.events.publish(session.sessionId, { type: "session.error", message });
+        this.publishStatus(session);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * A changed-id fork can rebind its runtime after a heartbeat published the
+   * prior identity as active. Clear every observable owner before forgetting
+   * that identity's local activity record.
+   */
+  private clearSupersededSessionActivity(session: PiAgentSession): void {
+    const sessionId = session.sessionId;
+    if (this.activities.get(sessionId)?.phase === "active") {
+      const at = new Date().toISOString();
+      const stored = { phase: "idle" as const, label: "idle", at };
+      this.activities.set(sessionId, stored);
+      const activity = { sessionId, ...stored };
+      this.events.publish(sessionId, { type: "activity.update", activity });
+      this.events.publishGlobal({ type: "activity.update", activity });
+    }
+    this.workspaceActivity?.removeSession(sessionId, session.sessionManager.getCwd());
+    this.activities.delete(sessionId);
+  }
+
   private async reloadSessionRuntime(session: PiAgentSession): Promise<void> {
     if (this.hasActiveWork(session)) throw new Error("Stop current session activity before reloading");
     await this.runTreeExclusiveOperation(
@@ -2410,6 +2484,11 @@ export class PiSessionService implements SessionRouteService {
     const sessionFile = session.sessionFile;
     if (sessionFile === undefined || sessionFile === "") throw new Error("Session is not persisted");
     await clearParentSession(sessionFile);
+    // The header rewrite keeps the inode, and whenever it leaves the file's
+    // size unchanged it is invisible to the gateway's summary memo, which
+    // cannot detect such rewrites from identity + size alone and would keep
+    // listing the old parent link until restart.
+    this.sessionManager.invalidateSessionFile(sessionFile);
     clearParentSessionHeader(session.sessionManager);
     this.unregisterSubsession(session.sessionId);
     await this.forgetUnreadSessions([{ sessionId: session.sessionId, cwd: session.sessionManager.getCwd() }]);
@@ -2676,7 +2755,11 @@ export class PiSessionService implements SessionRouteService {
       );
     }
 
-    const match = (await this.sessionManager.list(ref.cwd)).find((s) => s.id === ref.id || s.id.startsWith(ref.id));
+    // Resolve the session file directly by id: opening one known session must
+    // not depend on — or wait behind — a full transcript listing of its whole
+    // workspace. `getActive` routes prompt/shell/runCommand, so coupling it to
+    // the listing would let an in-flight listing serialize unrelated sends.
+    const match = await this.sessionManager.resolveSessionFile(ref.cwd, ref.id);
     if (!match) throw new Error("Session not found");
     return this.openExistingSession(match.id, match.cwd, () => this.sessionManager.open(match.path), options);
   }
@@ -3031,6 +3114,10 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private publishUnreadMutations(mutations: readonly SessionUnreadMutation[]): Promise<void> {
+    // The store applied the mutations already, so the status projection is told
+    // now rather than after the durable flush: it reads in-memory unread state
+    // and must not lag behind the rows the browser is about to see.
+    if (mutations.length > 0) this.onUnreadChanged?.();
     this.enqueueUnreadMutations(mutations);
     this.unreadPublicationFlushRequested = true;
     if (this.unreadPublication === undefined && this.unreadPublicationRetryTimer !== undefined) {

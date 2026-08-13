@@ -1,22 +1,24 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it } from "vitest";
-import type { Machine, WorkspaceActivity } from "../api";
+import type { Machine } from "../api";
+import type { MachineStatusSnapshot } from "../../../shared/machineStatus";
+import { machineStatusSnapshot } from "../machineStatus.testSupport";
 import { MachineSwitcher } from "./MachineSwitcher";
 
 afterEach(() => {
   document.body.replaceChildren();
 });
 
-describe("machine-switcher unread indicator", () => {
-  it("shows an unread dot on the switcher button while the selected machine has unread sessions", async () => {
-    const switcher = await mountSwitcher([machine("local", "local")], new Set(["local"]));
+describe("machine-switcher status indicator", () => {
+  it("shows an unread dot on the switcher button while the selected machine reports unread", async () => {
+    const switcher = await mountSwitcher([machine("local", "local")], { local: machineStatusSnapshot({ machine: { "core:unread": true } }) });
     const button = switcherButton(switcher);
     const dot = button.querySelector(".activity-indicator.unread");
     expect(dot).not.toBeNull();
     expect(dot?.getAttribute("title")).toBe("Unread sessions on this machine");
 
-    switcher.unreadMachineIds = new Set();
+    switcher.statusSnapshots = { local: machineStatusSnapshot({ revision: 2 }) };
     await switcher.updateComplete;
 
     expect(switcherButton(switcher).querySelector(".activity-indicator.unread")).toBeNull();
@@ -25,7 +27,7 @@ describe("machine-switcher unread indicator", () => {
   it("marks only the unread machines among the dropdown options", async () => {
     const switcher = await mountSwitcher(
       [machine("local", "local"), machine("remote-a", "remote"), machine("remote-b", "remote")],
-      new Set(["remote-b"]),
+      { "remote-b": machineStatusSnapshot({ machine: { "core:unread": true } }) },
     );
 
     switcherButton(switcher).click();
@@ -37,9 +39,7 @@ describe("machine-switcher unread indicator", () => {
   });
 
   it("wraps the work dot in an unread ring when the machine is busy and unread", async () => {
-    const switcher = await mountSwitcher([machine("local", "local")], new Set(["local"]));
-    switcher.activities = { local: { "/repo": workspaceActivity("/repo", true, false) } };
-    await switcher.updateComplete;
+    const switcher = await mountSwitcher([machine("local", "local")], { local: machineStatusSnapshot({ machine: { "core:working": true, "core:unread": true } }) });
 
     const button = switcherButton(switcher);
     const ring = button.querySelector(".unread-ring");
@@ -48,15 +48,21 @@ describe("machine-switcher unread indicator", () => {
     // One mark only: the ring replaces the standalone unread dot.
     expect(button.querySelector(".activity-indicator.unread")).toBeNull();
   });
+
+  it("shows no indicator for a machine that publishes no snapshot", async () => {
+    const switcher = await mountSwitcher([machine("local", "local")], {});
+
+    expect(switcherButton(switcher).querySelector(".activity-indicator")).toBeNull();
+  });
 });
 
-async function mountSwitcher(machines: Machine[], unreadMachineIds: ReadonlySet<string>): Promise<MachineSwitcher> {
+async function mountSwitcher(machines: Machine[], statusSnapshots: Record<string, MachineStatusSnapshot>): Promise<MachineSwitcher> {
   const switcher = new MachineSwitcher();
   switcher.machines = machines;
   const selected = machines[0];
   if (selected === undefined) throw new Error("Expected at least one machine");
   switcher.selected = selected;
-  switcher.unreadMachineIds = unreadMachineIds;
+  switcher.statusSnapshots = statusSnapshots;
   document.body.append(switcher);
   await switcher.updateComplete;
   return switcher;
@@ -77,10 +83,6 @@ function optionFor(switcher: MachineSwitcher, machineName: string): Element {
 
 function unreadDot(option: Element): Element | null {
   return option.querySelector(".activity-indicator.unread");
-}
-
-function workspaceActivity(cwd: string, hasSessionActivity: boolean, hasTerminalActivity: boolean): WorkspaceActivity {
-  return { cwd, hasSessionActivity, hasTerminalActivity, updatedAt: "2026-06-04T00:00:00.000Z" };
 }
 
 function machine(id: string, kind: Machine["kind"]): Machine {

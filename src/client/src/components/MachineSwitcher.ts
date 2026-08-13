@@ -1,9 +1,9 @@
 import { LitElement, css, html, type PropertyValues, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import type { Machine, MachineHealth, MachineStatus, WorkspaceActivity } from "../api";
-import { machineActivityIndicator } from "../workspaceActivity";
+import type { Machine, MachineHealth, MachineStatus } from "../api";
+import type { MachineStatusSnapshot } from "../../../shared/machineStatus";
 import { actionMenuPanelStyle } from "./actionMenu";
-import { renderActivityIndicator } from "./activityBadge";
+import { hasStatusUnread, renderActivityIndicator, statusActivityKind } from "./activityBadge";
 import { canRemoveMachine } from "./MachineList";
 import type { KeyboardNavigableSection } from "./navigationFocus";
 
@@ -12,8 +12,8 @@ export class MachineSwitcher extends LitElement implements KeyboardNavigableSect
   @property({ attribute: false }) machines: Machine[] = [];
   @property({ attribute: false }) selected?: Machine;
   @property({ attribute: false }) statuses: Record<string, MachineHealth> = {};
-  @property({ attribute: false }) activities: Record<string, Record<string, WorkspaceActivity>> = {};
-  @property({ attribute: false }) unreadMachineIds: ReadonlySet<string> = new Set();
+  /** Per-machine status trees, keyed by machine id; a machine without one shows no indicator. */
+  @property({ attribute: false }) statusSnapshots: Record<string, MachineStatusSnapshot> = {};
   @property({ attribute: false }) onSelect?: (machine: Machine) => void | Promise<void>;
   @property({ attribute: false }) onRemove?: (machine: Machine) => void | Promise<void>;
   @property({ attribute: false }) onFocusNextSection?: () => void | Promise<void>;
@@ -123,11 +123,12 @@ export class MachineSwitcher extends LitElement implements KeyboardNavigableSect
   }
 
   private renderActivity(machine: Machine): TemplateResult | undefined {
+    const flags = this.statusSnapshots[machine.id]?.machine;
     const status = machineStatus(machine, this.statuses);
     // Unread survives offline: an offline machine keeps its last-known unread
     // state (stale-but-present still counts), so only the work dot is gated.
-    const kind = status === "offline" || status === "error" ? undefined : machineActivityIndicator(this.activities[machine.id]);
-    const unreadLabel = this.unreadMachineIds.has(machine.id) ? "Unread sessions on this machine" : undefined;
+    const kind = status === "offline" || status === "error" ? undefined : statusActivityKind(flags);
+    const unreadLabel = hasStatusUnread(flags) ? "Unread sessions on this machine" : undefined;
     return renderActivityIndicator(kind, kind === "terminal" ? "Machine terminal active" : "Machine active", unreadLabel);
   }
 

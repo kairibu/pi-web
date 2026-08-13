@@ -220,7 +220,7 @@ describe("SessionCommandService", () => {
     expect(result).toMatchObject({ type: "select", title: "Fork from message", options: [{ value: "newest" }, { value: "middle" }, { value: "oldest" }] });
     if (result.type !== "select") throw new Error("Expected select result");
     await expect(service.respond("s1", result.requestId, "newest")).resolves.toMatchObject({ type: "done", message: "Session forked", session: { id: "s1" }, promptDraft: "newest message" });
-    expect(active.runtime.fork).toHaveBeenCalledWith("newest");
+    expect(active.runtime.fork).toHaveBeenCalledWith("newest", { position: "before" });
     await expect(service.respond("s1", result.requestId, "newest")).resolves.toEqual({ type: "unsupported", message: "Command request expired" });
   });
 
@@ -332,6 +332,79 @@ describe("SessionCommandService", () => {
       message: "Cannot fork while the session is active. Stop current activity before forking.",
     });
     expect(active.runtime.fork).not.toHaveBeenCalled();
+  });
+
+  it("forkEntry forks before user entries and returns their text as a prompt draft", async () => {
+    const active = activeSession();
+    vi.mocked(active.runtime.fork).mockResolvedValueOnce({ cancelled: false, selectedText: "hello again" });
+    const service = new SessionCommandService(() => getActive(active), vi.fn(), eventPublisher());
+
+    await expect(service.forkEntry("s1", "m1")).resolves.toMatchObject({
+      type: "done",
+      message: "Session forked",
+      session: { id: "s1" },
+      promptDraft: "hello again",
+    });
+    expect(active.runtime.fork).toHaveBeenCalledWith("m1", { position: "before" });
+  });
+
+  it("forkEntry forks at non-user entries so the forked file includes them", async () => {
+    const active = activeSession();
+    const service = new SessionCommandService(() => getActive(active), vi.fn(), eventPublisher());
+
+    await expect(service.forkEntry("s1", "entry-9")).resolves.toMatchObject({ type: "done", message: "Session forked" });
+    expect(active.runtime.fork).toHaveBeenCalledWith("entry-9", { position: "at" });
+  });
+
+  it("forkEntry reports cancellation without naming or returning session metadata", async () => {
+    const active = activeSession();
+    vi.mocked(active.runtime.fork).mockResolvedValueOnce({ cancelled: true });
+    const service = new SessionCommandService(() => getActive(active), vi.fn(), eventPublisher());
+
+    await expect(service.forkEntry("s1", "m1")).resolves.toEqual({ type: "done", message: "Fork cancelled" });
+    expect(active.runtime.session.setSessionName).not.toHaveBeenCalled();
+  });
+
+  it("forkEntry rejects while the session has active work or tree navigation owns the gate", async () => {
+    const active = activeSession({ isStreaming: true });
+    const service = new SessionCommandService(() => getActive(active), vi.fn(), eventPublisher());
+
+    await expect(service.forkEntry("s1", "m1")).resolves.toEqual({
+      type: "unsupported",
+      message: "Cannot fork while the session is active. Stop current activity before forking.",
+    });
+
+    const navigating = activeSession();
+    const navigatingService = new SessionCommandService(() => getActive(navigating), vi.fn(), eventPublisher(), {
+      isTreeNavigationActive: () => true,
+    });
+    await expect(navigatingService.forkEntry("s1", "m1")).resolves.toEqual({
+      type: "unsupported",
+      message: "Cannot run commands while session tree navigation is active. Stop or finish the navigation first.",
+    });
+    expect(active.runtime.fork).not.toHaveBeenCalled();
+    expect(navigating.runtime.fork).not.toHaveBeenCalled();
+  });
+
+  it("forkEntry names the forked session on success", async () => {
+    const active = activeSession({ sessionName: "Build auth" });
+    const forked = activeSession({ sessionId: "forked", sessionName: undefined }).runtime.session;
+    vi.mocked(active.runtime.fork).mockImplementationOnce(() => {
+      active.runtime.session = forked;
+      return Promise.resolve({ cancelled: false, selectedText: "some text" });
+    });
+    const events = eventPublisher();
+    const service = new SessionCommandService(() => getActive(active), vi.fn(), events, {}, {
+      listSessionNames: () => Promise.resolve(["Build auth"]),
+    });
+
+    await expect(service.forkEntry("s1", "entry-9")).resolves.toMatchObject({
+      type: "done",
+      message: "Session forked",
+      session: { id: "forked", name: "Build auth — Fork 1" },
+    });
+    expect(forked.setSessionName).toHaveBeenCalledWith("Build auth — Fork 1");
+    expect(events.publish).toHaveBeenCalledWith("forked", { type: "session.name", sessionId: "forked", name: "Build auth — Fork 1" });
   });
 });
 

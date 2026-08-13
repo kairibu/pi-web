@@ -8,6 +8,7 @@ import {
   emptyArchiveStore,
   fakeRuntime,
   fakeSessionManager,
+  resolveSessionFileFromList,
   runtimeCreator,
   sessionGateway,
   sessionRecord,
@@ -396,7 +397,6 @@ describe("PiSessionService daemon-owned unread state", () => {
         parentSessionId: "parent-1",
         parentSessionFile: parentFile,
         prompt: "do the slice",
-        cwd: "/workspace-feature",
       });
       completeRuntimeWork(child);
 
@@ -441,6 +441,8 @@ describe("PiSessionService daemon-owned unread state", () => {
         create: () => parentManager,
         list: () => Promise.resolve([]),
         listAll: () => Promise.resolve([]),
+        invalidateSessionFile: () => undefined,
+        resolveSessionFile: () => Promise.resolve(undefined),
         open: () => fakeSessionManager("/workspace-feature"),
       },
       archiveStore: emptyArchiveStore(),
@@ -486,6 +488,8 @@ describe("PiSessionService daemon-owned unread state", () => {
         create: () => parentManager,
         list: () => Promise.resolve([]),
         listAll: () => Promise.resolve([]),
+        invalidateSessionFile: () => undefined,
+        resolveSessionFile: () => Promise.resolve(undefined),
         open: () => fakeSessionManager("/workspace-feature"),
       },
       archiveStore: emptyArchiveStore(),
@@ -545,6 +549,8 @@ describe("PiSessionService daemon-owned unread state", () => {
         create: () => childManager,
         list: () => Promise.resolve([childRecord]),
         listAll: () => Promise.resolve([childRecord]),
+        invalidateSessionFile: () => undefined,
+        resolveSessionFile: resolveSessionFileFromList(() => Promise.resolve([childRecord])),
         open: (path) => path === parentFile ? parentManager : childManager,
       },
       archiveStore: emptyArchiveStore(),
@@ -610,6 +616,8 @@ describe("PiSessionService daemon-owned unread state", () => {
         create: () => fakeSessionManager(),
         list: () => Promise.resolve([sessionRecord("listed-idle"), sessionRecord("active-idle"), sessionRecord("busy")]),
         listAll: () => Promise.resolve([]),
+        invalidateSessionFile: () => undefined,
+        resolveSessionFile: resolveSessionFileFromList(() => Promise.resolve([sessionRecord("listed-idle"), sessionRecord("active-idle"), sessionRecord("busy")])),
         open: (path) => fakeSessionManager("/workspace", { getSessionId: () => path.replace(/^\/sessions\/|\.jsonl$/g, "") }),
       },
       archiveStore: {
@@ -670,6 +678,8 @@ describe("PiSessionService daemon-owned unread state", () => {
         create: () => fakeSessionManager(),
         list: () => Promise.resolve([root, directChild, archivedChild, grandchild]),
         listAll: () => Promise.resolve([]),
+        invalidateSessionFile: () => undefined,
+        resolveSessionFile: resolveSessionFileFromList(() => Promise.resolve([root, directChild, archivedChild, grandchild])),
         open: () => fakeSessionManager(),
       },
       archiveStore: {
@@ -712,6 +722,8 @@ describe("PiSessionService daemon-owned unread state", () => {
         create: () => fakeSessionManager(),
         list: () => Promise.resolve([]),
         listAll: () => Promise.resolve([sessionRecord("cleanup-archive", oldProjectCwd)]),
+        invalidateSessionFile: () => undefined,
+        resolveSessionFile: () => Promise.resolve(undefined),
         open: () => fakeSessionManager(),
       },
       archiveStore: {
@@ -821,6 +833,51 @@ describe("PiSessionService daemon-owned unread state", () => {
       await drainMicrotasks();
       expect((await service.unreadCatalog()).sessions).toEqual([]);
       expect(unreadEvents(hub).at(-1)).toMatchObject({ sessionId: "archive-active", unread: null });
+    } finally {
+      await service.dispose();
+    }
+  });
+  it("reports unread changes to the machine status projection as they are recorded", async () => {
+    const onUnreadChanged = vi.fn();
+    const unreadStore = new SessionUnreadStore({ createCatalogId: () => "catalog-test" });
+    const fake = fakeRuntime("session-1");
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR,
+      modelRuntime: testModelRuntime,
+      createAgentRuntime: runtimeCreator(fake.runtime),
+      sessionManager: sessionGateway([sessionRecord("session-1")]),
+      archiveStore: emptyArchiveStore(),
+      heartbeatIntervalMs: 60_000,
+      unreadStore,
+      onUnreadChanged,
+    });
+
+    try {
+      await service.status(sessionRef("session-1"));
+      expect(onUnreadChanged).not.toHaveBeenCalled();
+
+      completeRuntimeWork(fake);
+
+      // The projection reads in-memory unread state, so it is told as soon as
+      // the completion is recorded rather than after the durable flush.
+      expect(onUnreadChanged).toHaveBeenCalledTimes(1);
+
+      await service.acknowledgeUnread("session-1", {
+        cwd: WORKSPACE_CWD,
+        catalogId: "catalog-test",
+        throughCompletionOrder: 1,
+      });
+
+      expect(onUnreadChanged).toHaveBeenCalledTimes(2);
+
+      await service.acknowledgeUnread("session-1", {
+        cwd: WORKSPACE_CWD,
+        catalogId: "catalog-test",
+        throughCompletionOrder: 1,
+      });
+
+      // Nothing changed, so the projection is not asked to recompute again.
+      expect(onUnreadChanged).toHaveBeenCalledTimes(2);
     } finally {
       await service.dispose();
     }

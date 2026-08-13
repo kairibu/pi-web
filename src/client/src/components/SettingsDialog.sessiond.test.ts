@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { configApi, pluginsApi, type PiWebConfigResponse, type PiWebPluginsResponse } from "../api";
 import { SettingsDialog } from "./SettingsDialog";
-import { callDialogPromise, callDialogUpdated, configResponse, deferred, getDialogProperty, remoteMachine, secondRemoteMachine, setDialogProperty, stubWindowTimers } from "./SettingsDialog.testSupport";
+import { callDialogPromise, callDialogUpdated, configResponse, deferred, getDialogProperty, pluginsResponse, remoteMachine, secondRemoteMachine, setDialogProperty, stubWindowTimers } from "./SettingsDialog.testSupport";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -11,7 +11,7 @@ afterEach(() => {
 describe("settings-dialog session daemon machine targeting", () => {
   it("keeps gateway settings loads on the gateway config/plugin endpoints", async () => {
     const config = configResponse({ host: "127.0.0.1" });
-    const plugins: PiWebPluginsResponse = { plugins: [] };
+    const plugins: PiWebPluginsResponse = pluginsResponse([]);
     const configSpy = vi.spyOn(configApi, "config").mockResolvedValue(config);
     const pluginsSpy = vi.spyOn(pluginsApi, "plugins").mockResolvedValue(plugins);
     const dialog = new SettingsDialog();
@@ -40,8 +40,8 @@ describe("settings-dialog session daemon machine targeting", () => {
     expect(getDialogProperty(dialog, "sessiondLoading")).toBe(false);
   });
 
-  it("reloads desired config and the active runtime descriptor together", async () => {
-    const config = configResponse({ agent: { command: "agent-lab", dir: "/srv/agent-lab" } });
+  it("reloads session-daemon config and refreshes the machine runtime together", async () => {
+    const config = configResponse({ spawnSessions: false, subsessions: true });
     const configSpy = vi.spyOn(configApi, "config").mockResolvedValue(config);
     const runtimeRefresh = vi.fn(() => Promise.resolve());
     const dialog = new SettingsDialog();
@@ -72,9 +72,9 @@ describe("settings-dialog session daemon machine targeting", () => {
     expect(getDialogProperty(dialog, "saving")).toBe(false);
   });
 
-  it("saves a remote agent profile on the selected machine", async () => {
+  it("saves session-daemon toggles on the selected remote machine", async () => {
     stubWindowTimers();
-    const patch = { agent: { command: "agent-lab", dir: "/srv/agent-lab" } };
+    const patch = { spawnSessions: false, subsessions: true };
     const saved = configResponse(patch);
     const saveSpy = vi.spyOn(configApi, "saveConfig").mockResolvedValue(saved);
     const dialog = new SettingsDialog();

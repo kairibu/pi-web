@@ -63,8 +63,7 @@ export function componentDetails(component: PiWebComponentStatus): string {
 
 export function workspaceFlags(workspace: Workspace): string[] {
   return [
-    workspace.branch === undefined || workspace.branch === "" ? undefined : `branch ${workspace.branch}`,
-    workspace.isGitWorktree ? "git worktree" : workspace.isGitRepo ? "git repo" : "not a git repo",
+    workspace.provider === undefined ? "folder workspace" : `provider: ${workspace.provider.pluginId}`,
     workspace.isMain ? "main workspace" : undefined,
   ].filter((flag): flag is string => flag !== undefined);
 }

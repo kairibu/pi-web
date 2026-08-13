@@ -20,7 +20,7 @@ describe("SessionList bulk selection toolbar", () => {
     expect(toolbarButton(list, "Clear selected")).toBeNull();
     expect(toolbarButton(list, "Clear")).toBeNull();
     expect(toolbarButton(list, "Done")).toBeNull();
-    expect(selectionCount(list)?.textContent.trim()).toBe("0 selected");
+    expect(selectionCount(list)).toBeNull();
   });
 
   it("selects every visible session via Select visible, then clears them via Clear selected", async () => {
@@ -32,16 +32,29 @@ describe("SessionList bulk selection toolbar", () => {
     await list.updateComplete;
 
     expect(checkedBoxes(list)).toHaveLength(3);
-    expect(selectionCount(list)?.textContent.trim()).toBe("3 selected");
+    expect(toolbarButton(list, "Clear selected (3)")).not.toBeNull();
+    expect(selectionCount(list)).toBeNull();
     expect(toolbarButton(list, "Select visible")).toBeNull();
 
-    toolbarButton(list, "Clear selected")?.click();
+    toolbarButton(list, "Clear selected (3)")?.click();
     await list.updateComplete;
 
     expect(checkedBoxes(list)).toHaveLength(0);
-    expect(selectionCount(list)?.textContent.trim()).toBe("0 selected");
+    expect(selectionCount(list)).toBeNull();
     // Clearing keeps selection mode open so the visible set can be re-selected.
     expect(toolbarButton(list, "Select visible")).not.toBeNull();
+  });
+
+  it("keeps a large selected count inside the clear action", async () => {
+    const list = await renderSessionList(Array.from({ length: 121 }, (_, index) => session(String(index))));
+    currentSelectionToggle(list).click();
+    await list.updateComplete;
+
+    toolbarButton(list, "Select visible")?.click();
+    await list.updateComplete;
+
+    expect(toolbarButton(list, "Clear selected (121)")).not.toBeNull();
+    expect(selectionCount(list)).toBeNull();
   });
 
   it("clears a partial manual selection via Clear selected", async () => {
@@ -52,10 +65,11 @@ describe("SessionList bulk selection toolbar", () => {
     checkboxes(list)[0]?.click();
     await list.updateComplete;
 
-    expect(selectionCount(list)?.textContent.trim()).toBe("1 selected");
+    expect(toolbarButton(list, "Clear selected (1)")).not.toBeNull();
+    expect(selectionCount(list)).toBeNull();
     expect(toolbarButton(list, "Select visible")).toBeNull();
 
-    toolbarButton(list, "Clear selected")?.click();
+    toolbarButton(list, "Clear selected (1)")?.click();
     await list.updateComplete;
 
     expect(checkedBoxes(list)).toHaveLength(0);
@@ -90,9 +104,10 @@ describe("SessionList bulk selection toolbar", () => {
     toolbarButton(list, "Select visible")?.click();
     await list.updateComplete;
     expect(checkedBoxes(list)).toHaveLength(2);
-    expect(selectionCount(list)?.textContent.trim()).toBe("2 selected");
+    expect(toolbarButton(list, "Clear selected (2)")).not.toBeNull();
+    expect(selectionCount(list)).toBeNull();
 
-    toolbarButton(list, "Clear selected")?.click();
+    toolbarButton(list, "Clear selected (2)")?.click();
     await list.updateComplete;
     expect(checkedBoxes(list)).toHaveLength(0);
     expect(toolbarButton(list, "Select visible")).not.toBeNull();
