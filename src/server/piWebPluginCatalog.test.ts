@@ -6,11 +6,17 @@ import { isWithin, PI_WEB_PLUGIN_ARTIFACT_MAX_BYTES, PiWebPluginCatalog, type Pi
 
 let tempDir: string;
 
+const originalPiWebConfig = process.env["PI_WEB_CONFIG"];
+
 beforeEach(async () => {
   tempDir = await mkdtemp(join(tmpdir(), "pi-web-plugin-catalog-test-"));
+  // Point PI_WEB_CONFIG at a nonexistent path inside the test temp dir so catalogs using
+  // the default configProvider are isolated from the host PI WEB config.
+  process.env["PI_WEB_CONFIG"] = join(tempDir, "config.json");
 });
 
 afterEach(async () => {
+  restoreEnv("PI_WEB_CONFIG", originalPiWebConfig);
   await rm(tempDir, { recursive: true, force: true });
 });
 
@@ -755,4 +761,9 @@ async function writePlugin(root: string, options: { packageJson: unknown; files:
     await mkdir(join(filePath, ".."), { recursive: true });
     await writeFile(filePath, content);
   }
+}
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) Reflect.deleteProperty(process.env, key);
+  else process.env[key] = value;
 }
