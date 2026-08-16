@@ -20,7 +20,7 @@ const sysideWorkspace: Workspace = {
   path: "/model",
   label: "Project",
   isMain: true,
-  provider: { pluginId: "syside", capabilities: { request: true, remove: false } },
+  capabilities: [{ pluginId: "syside", id: "workspace.sysml" }],
 };
 
 afterEach(() => {
@@ -46,7 +46,7 @@ describe("bundled SysIDE browser plugin", () => {
     expect(panel.visible?.(panelContext(backend.request))).toBe(true);
     expect(panel.visible?.(panelContext(backend.request, {
       ...sysideWorkspace,
-      provider: { pluginId: "jj", capabilities: { request: true, remove: false } },
+      capabilities: [{ pluginId: "jj", id: "workspace.other" }],
     }))).toBe(false);
 
     const goTo = contributions.actions?.find((action) => action.id === "view.syside");
@@ -69,7 +69,7 @@ describe("bundled SysIDE browser plugin", () => {
     expect(panel.visible?.(panelContext(backendFixture().request))).toBe(true);
     expect(panel.visible?.(panelContext(backendFixture().request, {
       ...sysideWorkspace,
-      provider: { pluginId: runtimePluginId, capabilities: { request: true, remove: false } },
+      capabilities: [{ pluginId: runtimePluginId, id: "workspace.sysml" }],
     }))).toBe(false);
 
     const selectMainView = vi.fn<PluginRuntimeContext["selectMainView"]>();

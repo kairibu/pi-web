@@ -56,7 +56,7 @@ Treat every plugin package as trusted code:
 
 PI WEB's `/api/...` HTTP and WebSocket endpoints are internal implementation details. Browser code should use documented context helpers, including `context.backend.request()` for a paired server entry. Server code should use only `@jmfederico/pi-web/server-plugin-api`. Private routes, runtime objects, and source-internal imports are experimental and may change or disappear.
 
-## Workspace providers and replacement ownership
+## Workspace providers, replacement ownership, and project capabilities
 
 Sessiond is the single authority for project workspace discovery and spawned-session target validation. One active plugin exclusively owns a project's workspace semantics:
 
@@ -66,7 +66,9 @@ Sessiond is the single authority for project workspace discovery and spawned-ses
 4. Multiple claimants in the winning tier produce a visible conflict; PI WEB does not select by plugin id or import order.
 5. If no provider claims, PI WEB exposes the project folder as the kernel workspace. If a winner claims and then fails to list, PI WEB reports degraded state instead of silently switching owners.
 
-PI WEB ships only the bundled Git production provider. Replacement integrations, including Jujutsu providers, are owned and distributed by third parties. An installed and enabled primary provider can claim its projects and suppress fallback Git without any PI WEB core changes; this documentation does not promise or ship a reference replacement.
+Ownership is only half of the workspace story. A server plugin can also contribute **non-owning project capabilities**: reusable backend operations that attach to whatever workspace a provider (or the kernel folder) resolved for a project, without participating in ownership at all. Capabilities are detected against the resolved workspace path, listed on the workspace wire as `workspace.capabilities`, and dispatched through the same plugin-backend path even when a different plugin owns the workspace. Several plugins can attach capabilities to the same workspace, including ownerless folder workspaces.
+
+PI WEB ships the bundled Git production provider and the bundled SysIDE project capability. Replacement integrations, including Jujutsu providers, are owned and distributed by third parties. An installed and enabled primary provider can claim its projects and suppress the fallback Git provider without any PI WEB core changes; this documentation does not promise or ship a reference replacement.
 
 ## What to ask AI to build
 
@@ -185,6 +187,8 @@ import type { PiWebServerPlugin, WorkspaceProvider } from "@jmfederico/pi-web/se
 ```
 
 Git declares `machineSpecific: true`, contributes a fallback workspace provider, and implements its status/diff backend and removal plan through the public provider callbacks. It receives no raw routes or private PI WEB services. Use it to understand the demonstrated contract, not as a template for Git-specific fields: replacement providers define their own private data, public metadata, backend operations, and removal wording.
+
+The bundled `syside` plugin is a dual-entry capability plugin and a useful contrast: it contributes no workspace provider at all, so it never claims or owns a project. Instead its server entry contributes a non-owning `ProjectCapability` that is enabled whenever recursive `*.sysml` discovery finds a file below the resolved workspace path — including Git worktrees and ownerless folder workspaces — and exposes a single `check` backend operation that runs `syside check` over the discovered `*.sysml` files and returns `{ errors: string[] }`. The host attaches the capability to the workspace wire (`workspace.capabilities`) and dispatches the check through the plugin-backend path without requiring SysIDE to own the workspace. Its browser panel renders only those error messages, re-runs the check on the toolbar button and on connection, and never polls or reads the URL location.
 
 ## Copyable standalone workspace-provider example
 
@@ -307,7 +311,18 @@ Built-in plugins can be managed from **Settings → PI WEB plugins** or with the
 **Plugin id:** `git`
 **What it does:** claims Git projects as a fallback workspace provider, discovers worktrees, supplies provider-owned removal plans, and adds the Git status/diff workspace panel through its paired backend.
 
-Git is enabled by default and is the only production workspace provider bundled with PI WEB. An enabled primary third-party provider can claim a project before Git. Disabling `git` and restarting sessiond leaves the kernel project-folder workspace available; reload the browser afterward so Git contributions disappear. The generic Files, Terminal, and Session features continue to work in that folder workspace.
+Git is enabled by default. An enabled primary third-party provider can claim a project before Git. Disabling `git` and restarting sessiond leaves the kernel project-folder workspace available; reload the browser afterward so Git contributions disappear. The generic Files, Terminal, and Session features continue to work in that folder workspace.
+
+### SysIDE
+
+**Plugin id:** `syside`
+**What it does:** attaches a non-owning project capability to every workspace whose path contains `*.sysml` files and adds a **SysIDE** workspace panel that shows the error messages reported by `syside check` over those files.
+
+SysIDE is enabled by default.
+
+SysIDE is not a workspace provider: it never claims a project and never participates in workspace ownership, so Git keeps owning Git+SysML repositories and both integrations are exposed on the same workspace with no claim conflict and no degraded workspace. The server entry recursively discovers `*.sysml` files below the resolved workspace path (skipping `.git` and `node_modules`, and never following directory symlinks out of the project) and attaches the `workspace.sysml` capability to any workspace containing at least one, including Git worktrees and ownerless folder workspaces. The capability implements one `check` backend operation: an empty SysML result, or a clean check, returns `{ "errors": [] }`. A non-empty list shows exactly the `error:` messages directly in the panel, with no nested containers.
+
+The browser panel re-runs the check when its toolbar **Check** button is clicked and initially when the panel connects; it never polls and does not read the URL location. Backend or transport failures render in a top-level alert. The **Go to SysIDE** and **Refresh SysIDE** actions open the panel and re-run its check for the selected workspace. Disabling `syside` and restarting sessiond removes the capability and leaves the kernel project-folder workspace; reload the browser afterward so SysIDE contributions disappear.
 
 ### Updates
 

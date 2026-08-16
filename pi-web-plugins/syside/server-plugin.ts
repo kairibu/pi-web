@@ -1,40 +1,47 @@
 import type {
+  CapabilityRequestContext,
+  CapabilityWorkspace,
   PiWebServerPlugin,
-  ProjectInput,
-  ProviderClaim,
-  ProviderRequestContext,
-  ProviderWorkspace,
+  ProjectCapability,
   ServerPluginActivationContext,
-  WorkspaceProvider,
 } from "@jmfederico/pi-web/server-plugin-api";
-import { requestSysideBackend } from "./syside-backend.js";
+import { requestSysideCapability } from "./syside-backend.js";
 import { discoverSysmlFiles } from "./syside-discovery.js";
+
+/**
+ * The host reserves a deterministic local capability id namespace per server
+ * plugin. Keep this id stable: it is what the host repeats back on the
+ * workspace wire and what the browser panel matches on.
+ */
+export const SYSIDE_CAPABILITY_ID = "workspace.sysml";
 
 const plugin: PiWebServerPlugin = {
   apiVersion: 1,
   name: "SysIDE",
   activate(context) {
-    return { workspaceProvider: createSysideWorkspaceProvider(context) };
+    return { capabilities: [createSysideCapability(context)] };
   },
 };
 
 export default plugin;
 
-export function createSysideWorkspaceProvider(context: ServerPluginActivationContext): WorkspaceProvider {
+/**
+ * SysIDE is a non-owning project capability, not a workspace provider. It never
+ * participates in workspace ownership and never claims a project, so Git keeps
+ * owning Git+SysML repositories while both integrations are exposed on the same
+ * workspace with no claim conflict and no degraded workspace.
+ */
+export function createSysideCapability(context: ServerPluginActivationContext): ProjectCapability {
   return Object.freeze({
-    fallback: true,
-    async probe(project: ProjectInput, signal: AbortSignal): Promise<ProviderClaim> {
-      if (signal.aborted) throw new Error("SysIDE probe ended from signal abort");
-      // SysIDE claims every project with SysML files below the folder, including
-      // Git repositories (the recursive discovery skips .git subtrees). Because
-      // Git also claims such folders, a Git+SysML project resolves to a provider
-      // conflict that degrades to a folder workspace unless one of them is disabled.
-      return (await discoverSysmlFiles(project.path, signal)).length === 0 ? "pass" : "claim";
+    id: SYSIDE_CAPABILITY_ID,
+    async probe(workspace: CapabilityWorkspace, signal: AbortSignal): Promise<boolean> {
+      if (signal.aborted) throw new Error("SysIDE capability probe ended from signal abort");
+      // The capability is enabled whenever recursive *.sysml discovery finds a
+      // file below the resolved workspace path (the walk skips .git and
+      // node_modules and never follows directory symlinks out of the project),
+      // so it attaches to Git worktrees and ownerless folders alike.
+      return (await discoverSysmlFiles(workspace.path, signal)).length > 0;
     },
-    list(project: ProjectInput, signal: AbortSignal): Promise<ProviderWorkspace[]> {
-      if (signal.aborted) throw new Error("SysIDE list ended from signal abort");
-      return Promise.resolve([{ key: project.path, path: project.path, label: project.name, isMain: true }]);
-    },
-    request: (request: ProviderRequestContext) => requestSysideBackend(context, request),
+    request: (request: CapabilityRequestContext) => requestSysideCapability(context, request),
   });
 }

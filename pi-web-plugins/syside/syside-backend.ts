@@ -1,6 +1,6 @@
 import type {
+  CapabilityRequestContext,
   JsonValue,
-  ProviderRequestContext,
   ProviderResponse,
   ServerPluginActivationContext,
 } from "@jmfederico/pi-web/server-plugin-api";
@@ -21,17 +21,16 @@ interface SysideCommandResult {
   stderr: string;
 }
 
-/** Dispatch the SysIDE-owned check schema through the provider's request seam. */
-export async function requestSysideBackend(
+/** Dispatch the SysIDE-owned check schema through the capability's request seam. */
+export async function requestSysideCapability(
   activationContext: ServerPluginActivationContext,
-  request: ProviderRequestContext,
+  request: CapabilityRequestContext,
 ): Promise<ProviderResponse> {
   if (request.operation !== SYSIDE_CHECK_OPERATION) {
-    throw new Error(`Unsupported SysIDE workspace backend operation: ${request.operation}`);
+    throw new Error(`Unsupported SysIDE capability operation: ${request.operation}`);
   }
   requireCheckInput(request.input);
   const response = await sysideCheck(activationContext, request.workspace.path, request.signal);
-  // A fresh object literal keeps the interface-typed result JSON-serializable.
   return { errors: response.errors };
 }
 

@@ -326,17 +326,28 @@ import type { PiWebServerPlugin, WorkspaceProvider } from "@jmfederico/pi-web/se
             </section>
 
             <section id="provider-contract">
-              <h2>Workspace provider contract</h2>
+              <h2>Workspace provider and project capability contracts</h2>
               <p>
                 Sessiond is the single workspace authority. An enabled server entry can contribute at most one provider.
-                Primary providers probe first; bundled Git probes only as a fallback. Exactly one claimant owns the whole
+                Primary providers probe first; bundled Git probes only as a fallback. Exactly one claimant owns
+                the whole
                 project's workspace semantics. Multiple claimants in the winning tier produce a visible conflict rather
                 than import-order selection. If nobody claims, the kernel project-folder workspace remains available.
               </p>
               <p>
+                Ownership is only half of the workspace story. A server entry can also contribute non-owning
+                <strong>project capabilities</strong>: reusable backend operations that attach to whatever workspace a
+                provider (or the kernel folder) resolved for a project, without participating in ownership at all.
+                Capabilities are detected against the resolved workspace path, listed on the workspace wire as
+                <code>workspace.capabilities</code>, and dispatched through the same plugin-backend path even when a
+                different plugin owns the workspace. Several plugins can attach capabilities to the same workspace,
+                including ownerless folder workspaces.
+              </p>
+              <p>
                 A server module default-exports <code>{ apiVersion: 1, name, activate }</code>. Activation may return
                 cooperative <code>start</code>, <code>stop</code>, and <code>health</code> callbacks plus at most one
-                provider. Every activation, lifecycle, provider, and request signal is scoped to that one invocation and
+                provider and any number of <code>capabilities</code>. Every activation, lifecycle, provider, capability,
+                and request signal is scoped to that one invocation and
                 is aborted when it times out or settles; it is not a plugin-lifetime shutdown signal. Release resources
                 in explicit <code>stop()</code>. Server code is never hot-reloaded.
               </p>
@@ -346,6 +357,13 @@ import type { PiWebServerPlugin, WorkspaceProvider } from "@jmfederico/pi-web/se
                 request/removal capabilities. Public metadata is visible to all browser code and API consumers, so it
                 must never contain secrets. <code>capabilities.remove</code> is true only for a workspace that advertises
                 removal and whose owner implements it.
+              </p>
+              <p>
+                A capability is <code>{ id, probe(workspace, signal), request(context) }</code>: <code>probe</code> decides
+                whether the capability applies to the resolved workspace path (the host calls it to attach the capability
+                and again before each dispatch, so a capability is never served for a path it no longer matches), and
+                <code>request</code> implements the backend operations. Capability dispatch never requires the
+                contributing plugin to own the workspace.
               </p>
               <p>
                 A removal plan approves a visible host-owned terminal run; it does not mean removal has completed. Its
@@ -362,9 +380,10 @@ import type { PiWebServerPlugin, WorkspaceProvider } from "@jmfederico/pi-web/se
                 shortcut aliases exist only for browser-v1 migrations.
               </p>
               <div class="callout">
-                PI WEB ships only bundled Git as a production provider. Third parties own replacement integrations such
-                as Jujutsu providers. An installed primary provider can claim its projects and suppress fallback Git
-                without PI WEB core changes; no reference replacement is shipped or promised here.
+                PI WEB ships the bundled Git production provider and the bundled SysIDE project capability. Third parties
+                own replacement integrations such as Jujutsu providers. An installed primary provider can claim its
+                projects and suppress the fallback Git provider without PI WEB core changes; no reference replacement is
+                shipped or promised here.
               </div>
             </section>
 
@@ -389,6 +408,31 @@ import type { PiWebServerPlugin, WorkspaceProvider } from "@jmfederico/pi-web/se
                 restarting sessiond leaves the kernel folder workspace plus generic Files, Terminal, and Session features;
                 reload the browser so Git contributions disappear.
               </p>
+
+              <h3>SysIDE</h3>
+              <p>
+                <strong>SysIDE</strong> is enabled by default and attaches a non-owning project capability to every
+                workspace whose path contains <code>*.sysml</code> files. It adds a <strong>SysIDE</strong> workspace
+                panel that shows the error messages reported by <code>syside check</code> over those files.
+              </p>
+              <ul>
+                <li>Plugin id: <code>syside</code></li>
+                <li>
+                  SysIDE is not a workspace provider: it never claims a project and never participates in workspace
+                  ownership, so Git keeps owning Git+SysML repositories and both integrations are exposed on the same
+                  workspace with no claim conflict and no degraded workspace.
+                </li>
+                <li>
+                  Recursively discovers <code>*.sysml</code> below the resolved workspace path, skipping
+                  <code>.git</code> and <code>node_modules</code> and never following directory symlinks out of the
+                  project; any workspace that contains at least one file is attached the <code>workspace.sysml</code>
+                  capability, including Git worktrees and ownerless folder workspaces.
+                </li>
+                <li>Implements one <code>check</code> backend operation returning <code>{ errors: string[] }</code>; no SysML files or a clean check returns an empty list.</li>
+                <li>The panel re-runs the check from its toolbar button and initially on connection, without polling or URL handling; backend failures render in a top-level alert.</li>
+                <li><strong>Go to SysIDE</strong> and <strong>Refresh SysIDE</strong> actions open the panel and re-run its check.</li>
+                <li>Disabling <code>syside</code> and restarting sessiond removes the capability and leaves the kernel folder workspace; reload the browser so SysIDE contributions disappear.</li>
+              </ul>
 
               <h3>Updates</h3>
               <p>

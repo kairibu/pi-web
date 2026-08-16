@@ -57,6 +57,37 @@ describe("bundled PI WEB plugins", () => {
     expect(violations).toEqual([]);
     expect([...visited].map((file) => relative(root, file)).sort()).toContain("git-panel.ts");
   });
+
+  it("keeps the bundled SysIDE browser graph on the public API and package-local modules", async () => {
+    const root = resolve("pi-web-plugins/syside/browser");
+    const entry = resolve(root, "pi-web-plugin.ts");
+    const pending = [entry];
+    const visited = new Set<string>();
+    const violations: string[] = [];
+
+    while (pending.length > 0) {
+      const file = pending.pop();
+      if (file === undefined || visited.has(file)) continue;
+      visited.add(file);
+      const source = await readFile(file, "utf8");
+      for (const specifier of moduleSpecifiers(source)) {
+        if (specifier === "@jmfederico/pi-web/plugin-api") continue;
+        if (!specifier.startsWith("./")) {
+          violations.push(`${relative(process.cwd(), file)}: browser import ${specifier}`);
+          continue;
+        }
+        const dependency = resolve(dirname(file), specifier.replace(/\.js$/u, ".ts"));
+        if (dependency !== root && !dependency.startsWith(`${root}${sep}`)) {
+          violations.push(`${relative(process.cwd(), file)}: browser import escapes the SysIDE package (${specifier})`);
+          continue;
+        }
+        pending.push(dependency);
+      }
+    }
+
+    expect(violations).toEqual([]);
+    expect([...visited].map((file) => relative(root, file)).sort()).toContain("syside-panel.ts");
+  });
 });
 
 function moduleSpecifiers(source: string): string[] {

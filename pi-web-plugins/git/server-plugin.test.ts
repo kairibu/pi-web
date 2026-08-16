@@ -12,6 +12,7 @@ import type {
 import type { Project } from "../../src/shared/apiTypes.js";
 import { createServerPluginExecFile } from "../../src/server/plugins/serverPluginExec.js";
 import type { ServerPluginProviderContribution } from "../../src/server/plugins/serverPluginRuntime.js";
+import { WorkspaceCapabilityRegistry } from "../../src/server/workspaces/workspaceCapabilityRegistry.js";
 import { WorkspaceProviderRegistry } from "../../src/server/workspaces/workspaceProviderRegistry.js";
 import {
   GIT_DIFF_OPERATION,
@@ -111,6 +112,7 @@ describe("bundled Git workspace provider", () => {
     const workspaceProvider = await providerFor(createServerPluginExecFile({ env: cleanGitEnvironment() }));
     const registry = new WorkspaceProviderRegistry({
       contributions: [contribution("git", workspaceProvider)],
+      capabilities: new WorkspaceCapabilityRegistry({ contributions: [], logger: { warn: vi.fn() } }),
       logger: { warn: vi.fn() },
     });
 
@@ -142,6 +144,7 @@ describe("bundled Git workspace provider", () => {
     const input = project(repository.path);
     const registry = new WorkspaceProviderRegistry({
       contributions: [contribution("git", workspaceProvider)],
+      capabilities: new WorkspaceCapabilityRegistry({ contributions: [], logger: { warn: vi.fn() } }),
       logger: { warn: vi.fn() },
     });
     const workspaceId = (await registry.resolve(input)).workspaces[0]?.id;
@@ -290,6 +293,7 @@ describe("bundled Git workspace provider", () => {
     const workspaceProvider = await providerFor(createServerPluginExecFile({ env: cleanGitEnvironment() }));
     const registry = new WorkspaceProviderRegistry({
       contributions: [contribution("git", workspaceProvider)],
+      capabilities: new WorkspaceCapabilityRegistry({ contributions: [], logger: { warn: vi.fn() } }),
       logger: { warn: vi.fn() },
     });
 
@@ -308,6 +312,7 @@ describe("bundled Git workspace provider", () => {
     };
     const registry = new WorkspaceProviderRegistry({
       contributions: [contribution("git", gitProvider), contribution("primary", primaryProvider)],
+      capabilities: new WorkspaceCapabilityRegistry({ contributions: [], logger: { warn: vi.fn() } }),
       logger: { warn: vi.fn() },
       pathInspector: () => true,
     });

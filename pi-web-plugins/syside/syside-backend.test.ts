@@ -3,14 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
-  ProviderRequestContext,
   ServerPluginActivationContext,
   ServerPluginExecFileResult,
 } from "@jmfederico/pi-web/server-plugin-api";
 import {
   SYSIDE_CHECK_OPERATION,
   parseSysideErrors,
-  requestSysideBackend,
+  requestSysideCapability,
   sysideCheck,
 } from "./syside-backend.js";
 
@@ -127,19 +126,18 @@ describe("sysideCheck", () => {
   });
 });
 
-describe("requestSysideBackend", () => {
+describe("requestSysideCapability", () => {
   it("rejects unsupported operations and malformed check input before running a command", async () => {
     const execFile = vi.fn();
     const context = contextWith(execFile);
     const base = {
-      project: { id: "project-1", name: "Project", path: "/repo" },
-      workspace: { key: "/repo", path: "/repo", label: "Project", isMain: true },
+      workspace: { path: "/repo" },
       signal: new AbortController().signal,
-    } satisfies Omit<ProviderRequestContext, "operation" | "input">;
+    };
 
-    await expect(requestSysideBackend(context, { ...base, operation: "history", input: null }))
-      .rejects.toThrow("Unsupported SysIDE workspace backend operation");
-    await expect(requestSysideBackend(context, { ...base, operation: SYSIDE_CHECK_OPERATION, input: {} }))
+    await expect(requestSysideCapability(context, { ...base, operation: "history", input: null }))
+      .rejects.toThrow("Unsupported SysIDE capability operation");
+    await expect(requestSysideCapability(context, { ...base, operation: SYSIDE_CHECK_OPERATION, input: {} }))
       .rejects.toThrow("SysIDE check input must be null");
     expect(execFile).not.toHaveBeenCalled();
   });
@@ -151,9 +149,8 @@ describe("requestSysideBackend", () => {
       stdout: "error: Broken element\n",
     })));
 
-    const result = await requestSysideBackend(contextWith(execFile), {
-      project: { id: "project-1", name: "Project", path: folder },
-      workspace: { key: folder, path: folder, label: "Project", isMain: true },
+    const result = await requestSysideCapability(contextWith(execFile), {
+      workspace: { path: folder },
       operation: SYSIDE_CHECK_OPERATION,
       input: null,
       signal: new AbortController().signal,

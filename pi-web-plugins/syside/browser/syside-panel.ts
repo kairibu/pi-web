@@ -52,8 +52,8 @@ class SysideUiController {
 
   constructor(private readonly sourcePluginId: string) {}
 
-  isOwnedWorkspace(workspace: Workspace | undefined): boolean {
-    return workspace?.provider?.pluginId === this.sourcePluginId;
+  isSysideWorkspace(workspace: Workspace | undefined): boolean {
+    return workspace?.capabilities?.some((capability) => capability.pluginId === this.sourcePluginId) === true;
   }
 
   state(context: WorkspacePanelContext): SysideWorkspaceUiState {
@@ -76,7 +76,7 @@ class SysideUiController {
   }
 
   invalidate(context: WorkspacePanelContext): Promise<void> {
-    if (!this.isOwnedWorkspace(context.workspace)) return Promise.resolve();
+    if (!this.isSysideWorkspace(context.workspace)) return Promise.resolve();
     return this.check(context);
   }
 
@@ -145,7 +145,7 @@ class SysideUiController {
 }
 
 function createSysideActions(panelId: string, controller: SysideUiController): PluginAction[] {
-  const hasSysideWorkspace = (context: PluginRuntimeContext): boolean => controller.isOwnedWorkspace(context.state.selectedWorkspace);
+  const hasSysideWorkspace = (context: PluginRuntimeContext): boolean => controller.isSysideWorkspace(context.state.selectedWorkspace);
   return [
     {
       id: "view.syside",
@@ -183,14 +183,14 @@ function createSysidePanel(
       </svg>
     `,
     order: 30,
-    visible: (context) => controller.isOwnedWorkspace(context.workspace),
+    visible: (context) => controller.isSysideWorkspace(context.workspace),
     onInvalidate: (context) => controller.invalidate(context),
     render: (context) => renderSysidePanel(html, controller, context),
   };
 }
 
 function requestSysideBackend(context: WorkspacePanelContext, operation: string, input: JsonValue): Promise<JsonValue> {
-  if (context.backend === undefined || context.workspace.provider?.capabilities.request === false) {
+  if (context.backend === undefined) {
     return Promise.reject(new Error("SysIDE workspace backend is unavailable. Update and restart PI WEB on this machine, then reload the browser."));
   }
   return context.backend.request(operation, input);

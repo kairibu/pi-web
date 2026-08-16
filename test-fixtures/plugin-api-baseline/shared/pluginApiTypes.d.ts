@@ -15,6 +15,18 @@ export interface WorkspaceProviderMetadata {
     readonly capabilities: WorkspaceProviderCapabilities;
     readonly metadata?: JsonObject;
 }
+/**
+ * A non-owning project capability attached to one resolved workspace. Unlike
+ * `WorkspaceProviderMetadata`, a capability never claims or owns a workspace:
+ * several plugins can contribute capabilities to the same workspace regardless
+ * of which provider (if any) owns it.
+ */
+export interface WorkspaceCapability {
+    /** Plugin that contributed the capability. */
+    readonly pluginId: string;
+    /** Plugin-local capability id. */
+    readonly id: string;
+}
 /** Provider-authored removal wording exposed to browser plugins. */
 export interface WorkspaceRemovalPresentation {
     readonly actionLabel: string;

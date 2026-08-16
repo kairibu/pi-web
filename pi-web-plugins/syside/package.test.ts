@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PiWebPluginCatalog } from "../../src/server/piWebPluginCatalog.js";
 import { createServerPluginRuntime } from "../../src/server/plugins/serverPluginRuntime.js";
+import { WorkspaceCapabilityRegistry } from "../../src/server/workspaces/workspaceCapabilityRegistry.js";
 import { WorkspaceProviderRegistry } from "../../src/server/workspaces/workspaceProviderRegistry.js";
 
 const tempRoots: string[] = [];
@@ -46,7 +47,11 @@ describe("bundled SysIDE package metadata", () => {
     const importer = vi.fn(() => Promise.reject(new Error("disabled SysIDE module was imported")));
     const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const runtime = await createServerPluginRuntime({ catalog, importer, logger });
-    const registry = new WorkspaceProviderRegistry({ contributions: runtime.providerContributions(), logger });
+    const registry = new WorkspaceProviderRegistry({
+      contributions: runtime.providerContributions(),
+      capabilities: new WorkspaceCapabilityRegistry({ contributions: [], logger }),
+      logger,
+    });
 
     const resolution = await registry.resolve({
       id: "project-1",

@@ -1,0 +1,5 @@
+---
+"@jmfederico/pi-web": minor
+---
+
+Add a generic server-plugin **project capability** contract and convert SysIDE from a workspace provider into a non-owning capability. A server module can now contribute reusable `ProjectCapability` objects that are enabled whenever their detection finds a match below a resolved workspace path — including Git worktrees and ownerless folder workspaces — without ever claiming or owning the workspace. The host attaches matching capabilities to `workspace.capabilities`, collects them at runtime, and dispatches their backend operations through the existing plugin-backend path even when a different plugin owns the workspace. SysIDE now uses this contract: `syside check` runs over `*.sysml` files discovered inside a Git worktree while Git retains workspace ownership, so a Git+SysML project exposes both integrations with no claim conflict and no degraded workspace. Add `@jmfederico/pi-web/server-plugin-api` `ProjectCapability` (plus the `WorkspaceCapability` wire type) as public API, and document the capability contract alongside the workspace provider contract.
