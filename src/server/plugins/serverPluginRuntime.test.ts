@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { PiWebServerPlugin, ServerPluginActivation, ServerPluginActivationContext, WorkspaceProvider } from "../../server-plugin-api.js";
+import type { PiWebServerPlugin, ProjectCapability, ServerPluginActivation, ServerPluginActivationContext, WorkspaceProvider } from "../../server-plugin-api.js";
 import type { PiWebPluginScope } from "../../shared/apiTypes.js";
 import type { PiWebPluginCatalogEntry, PiWebPluginCatalogSnapshot } from "../piWebPluginCatalog.js";
 import {
@@ -345,6 +345,63 @@ describe("server plugin runtime", () => {
     expect(records[0]?.message).toContain("must not contain cycles");
     expect(records[1]?.message).toBe("Server plugins may contribute only one workspaceProvider");
   });
+
+  it("collects non-owning capability contributions alongside provider contributions", async () => {
+    const capability = testCapability();
+    const modules = new Map<string, unknown>([
+      ["syside", pluginModule("SysIDE", { capabilities: [capability] })],
+      ["git", pluginModule("Git", { workspaceProvider: testProvider() })],
+      ["hybrid", pluginModule("Hybrid", {
+        workspaceProvider: testProvider(),
+        capabilities: [testCapability("workspace.lint")],
+      })],
+    ]);
+    const importer: ServerPluginModuleImporter = (url) => Promise.resolve(modules.get(pluginIdFromUrl(url)));
+    const runtime = await createServerPluginRuntime({
+      catalog: { snapshot: () => Promise.resolve(testSnapshot([entry("git"), entry("hybrid"), entry("syside")])) },
+      importer,
+      logger: testLogger(),
+    });
+
+    expect(runtime.providerContributions().map((contribution) => contribution.pluginId)).toEqual(["git", "hybrid"]);
+    expect(runtime.capabilityContributions().map((contribution) => [contribution.pluginId, contribution.capabilityId])).toEqual([
+      ["hybrid", "workspace.lint"],
+      ["syside", "workspace.sysml"],
+    ]);
+    await expect(runtime.capabilityContributions()[0]?.capability.probe(
+      { path: "/p" },
+      new AbortController().signal,
+    )).resolves.toBe(true);
+  });
+
+  it("rejects duplicate, malformed, or non-array capability contributions", async () => {
+    const duplicateIds = { capabilities: [testCapability(), testCapability()] };
+    const missingRequest = { capabilities: [{ id: "workspace.lint", probe: () => Promise.resolve(true) }] };
+    const notArray = { capabilities: testCapability() };
+    const modules = new Map<string, unknown>([
+      ["duplicate", pluginModule("Duplicate", duplicateIds)],
+      ["missing-request", pluginModule("Missing request", missingRequest)],
+      ["not-array", pluginModule("Not array", notArray)],
+    ]);
+    const importer: ServerPluginModuleImporter = (url) => Promise.resolve(modules.get(pluginIdFromUrl(url)));
+    const runtime = await createServerPluginRuntime({
+      catalog: { snapshot: () => Promise.resolve(testSnapshot([
+        entry("duplicate"),
+        entry("missing-request"),
+        entry("not-array"),
+      ])) },
+      importer,
+      logger: testLogger(),
+    });
+
+    expect(runtime.capabilityContributions()).toEqual([]);
+    const records = runtime.healthRecords();
+    expect(records.map((record) => [record.pluginId, record.state, record.message])).toEqual([
+      ["duplicate", "incompatible", "Server plugin capability 2 id is duplicated: workspace.sysml"],
+      ["missing-request", "incompatible", "Server plugin capability 1 must define probe and request functions"],
+      ["not-array", "incompatible", "Server plugin capabilities must be an array"],
+    ]);
+  });
 });
 
 function entry(
@@ -381,6 +438,14 @@ function testProvider(): WorkspaceProvider {
   return {
     probe: () => Promise.resolve("pass"),
     list: () => Promise.resolve([]),
+  };
+}
+
+function testCapability(id = "workspace.sysml"): ProjectCapability {
+  return {
+    id,
+    probe: () => Promise.resolve(true),
+    request: () => Promise.resolve({ ok: true }),
   };
 }
 

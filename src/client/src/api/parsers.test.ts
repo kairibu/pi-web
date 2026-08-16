@@ -643,6 +643,44 @@ describe("API parsers", () => {
     });
   });
 
+  it("parses non-owning workspace capabilities alongside the owner provider", () => {
+    const workspace = parseWorkspace({
+      id: "w1",
+      projectId: "p1",
+      path: "/repo/worktree",
+      label: "feature",
+      isMain: false,
+      provider: { pluginId: "git", capabilities: { request: true, remove: true } },
+      capabilities: [{ pluginId: "syside", id: "workspace.sysml" }, { pluginId: "linter", id: "workspace.lint" }],
+      removal: { actionLabel: "Remove workspace", confirmation: "Remove worktree?", precondition: "v1.confirmed" },
+      effectiveConfig: {},
+    });
+
+    expect(workspace).toMatchObject({
+      provider: { pluginId: "git", capabilities: { request: true, remove: true } },
+      capabilities: [{ pluginId: "syside", id: "workspace.sysml" }, { pluginId: "linter", id: "workspace.lint" }],
+    });
+    expect(Object.isFrozen(workspace.capabilities)).toBe(true);
+    expect(Object.isFrozen(workspace.capabilities?.[0])).toBe(true);
+    expect(parseWorkspace({
+      id: "w1",
+      projectId: "p1",
+      path: "/repo/worktree",
+      label: "feature",
+      isMain: false,
+      effectiveConfig: {},
+    })).not.toHaveProperty("capabilities");
+    expect(() => parseWorkspace({
+      id: "w1",
+      projectId: "p1",
+      path: "/repo/worktree",
+      label: "feature",
+      isMain: false,
+      capabilities: [{ pluginId: "syside" }],
+      effectiveConfig: {},
+    })).toThrow("Expected string field: id");
+  });
+
   it("freezes host-owned workspace snapshots recursively", () => {
     const workspace = parseWorkspace({
       id: "w1",

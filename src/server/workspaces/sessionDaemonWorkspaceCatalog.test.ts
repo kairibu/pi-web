@@ -30,6 +30,10 @@ const providerWorkspace = {
     confirmation: "Disconnect this view?",
     precondition: "v1.confirmed",
   },
+  capabilities: [
+    { pluginId: "syside", id: "workspace.sysml" },
+    { pluginId: "linter", id: "workspace.lint" },
+  ],
 };
 
 describe("SessionDaemonWorkspaceCatalog", () => {
@@ -57,6 +61,10 @@ describe("SessionDaemonWorkspaceCatalog", () => {
       label: "feature/one",
       provider: { pluginId: "replacement", metadata: { branch: "feature/one", detached: false } },
       removal: { precondition: "v1.confirmed" },
+      capabilities: [
+        { pluginId: "syside", id: "workspace.sysml" },
+        { pluginId: "linter", id: "workspace.lint" },
+      ],
     });
     expect(listed[0]).not.toHaveProperty("branch");
     expect(resolved).toEqual(listed[0]);
@@ -68,6 +76,8 @@ describe("SessionDaemonWorkspaceCatalog", () => {
     expect(Object.isFrozen(listed[0]?.provider?.capabilities)).toBe(true);
     expect(Object.isFrozen(listed[0]?.provider?.metadata)).toBe(true);
     expect(Object.isFrozen(listed[0]?.removal)).toBe(true);
+    expect(Object.isFrozen(listed[0]?.capabilities)).toBe(true);
+    expect(Object.isFrozen(listed[0]?.capabilities?.[0])).toBe(true);
     expect(Object.isFrozen(resolved)).toBe(true);
   });
 

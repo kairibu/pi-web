@@ -149,8 +149,21 @@ export function parseWorkspace(value: unknown): Workspace {
     isMain: requireBoolean(record, "isMain"),
     ...optionalField("provider", optionalWorkspaceProviderMetadata(record["provider"])),
     ...optionalField("removal", optionalWorkspaceRemovalPresentation(record["removal"])),
+    ...optionalField("capabilities", optionalWorkspaceCapabilities(record["capabilities"])),
     effectiveConfig: requireWorkspaceEffectiveConfig(record["effectiveConfig"]),
   });
+}
+
+function optionalWorkspaceCapabilities(value: unknown): Workspace["capabilities"] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error("Invalid workspace capabilities field");
+  return Object.freeze(value.map((item, index) => {
+    if (!isRecord(item) || Array.isArray(item)) throw new Error(`Invalid workspace capability ${String(index + 1)}`);
+    return Object.freeze({
+      pluginId: requireString(item, "pluginId"),
+      id: requireString(item, "id"),
+    });
+  }));
 }
 
 export function parseWorkspaceProviderResolution(value: unknown): WorkspaceProviderResolution {

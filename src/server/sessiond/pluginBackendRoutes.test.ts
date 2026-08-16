@@ -1,8 +1,9 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkspaceProvider } from "../../server-plugin-api.js";
-import type { ServerPluginProviderContribution } from "../plugins/serverPluginRuntime.js";
+import type { ProjectCapability, WorkspaceProvider } from "../../server-plugin-api.js";
+import type { ServerPluginCapabilityContribution, ServerPluginProviderContribution } from "../plugins/serverPluginRuntime.js";
 import type { Project } from "../types.js";
+import { WorkspaceCapabilityRegistry } from "../workspaces/workspaceCapabilityRegistry.js";
 import { WorkspaceProviderRegistry } from "../workspaces/workspaceProviderRegistry.js";
 import { registerPluginBackendRoutes } from "./pluginBackendRoutes.js";
 
@@ -106,6 +107,42 @@ describe("session daemon plugin backend routes", () => {
     expect(missing.json()).toMatchObject({ code: "project-not-found" });
     expect(request).not.toHaveBeenCalled();
   });
+
+  it("dispatches a non-owner capability operation through the host registry", async () => {
+    const sysideRequest = vi.fn(() => Promise.resolve({ errors: ["Broken model"] }));
+    const capabilities = new WorkspaceCapabilityRegistry({
+      contributions: [capabilityContribution("syside", {
+        id: "workspace.sysml",
+        probe: () => Promise.resolve(true),
+        request: () => sysideRequest(),
+      })],
+      logger: { warn: vi.fn() },
+    });
+    const registry = new WorkspaceProviderRegistry({
+      contributions: [contribution("board", {
+        probe: () => Promise.resolve("claim"),
+        list: () => Promise.resolve([{ key: "main", path: "/repo", label: "main", isMain: true }]),
+      })],
+      capabilities,
+      logger: { warn: vi.fn() },
+      pathInspector: () => true,
+    });
+    const workspaceId = (await registry.resolve(project)).workspaces[0]?.id;
+    if (workspaceId === undefined) throw new Error("Expected workspace");
+    const onWorkspacesMutated = vi.fn();
+    registerPluginBackendRoutes(app, { projects: projectReader(), backends: registry, onWorkspacesMutated });
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/plugin-backends/syside/projects/${encodeURIComponent(project.id)}/workspaces/${workspaceId}/check`,
+      payload: { revision: "server-r1", input: null },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ errors: ["Broken model"] });
+    expect(sysideRequest).toHaveBeenCalledTimes(1);
+    expect(onWorkspacesMutated).toHaveBeenCalledTimes(1);
+  });
 });
 
 function projectReader() {
@@ -119,6 +156,7 @@ function projectReader() {
 function registryFor(provider: WorkspaceProvider): WorkspaceProviderRegistry {
   return new WorkspaceProviderRegistry({
     contributions: [contribution("board", provider)],
+    capabilities: new WorkspaceCapabilityRegistry({ contributions: [], logger: { warn: vi.fn() } }),
     logger: { warn: vi.fn() },
     pathInspector: () => true,
   });
@@ -133,5 +171,18 @@ function contribution(pluginId: string, provider: WorkspaceProvider): ServerPlug
     scope: "local",
     moduleRevision: "server-r1",
     provider,
+  };
+}
+
+function capabilityContribution(pluginId: string, capability: ProjectCapability): ServerPluginCapabilityContribution {
+  return {
+    pluginId,
+    pluginName: pluginId,
+    packageRoot: `/plugins/${pluginId}`,
+    source: "test fixture",
+    scope: "local",
+    moduleRevision: "server-r1",
+    capabilityId: capability.id,
+    capability,
   };
 }

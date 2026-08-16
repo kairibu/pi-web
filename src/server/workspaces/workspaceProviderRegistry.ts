@@ -31,6 +31,7 @@ import type {
   ServerPluginHealthInspection,
   ServerPluginProviderContribution,
 } from "../plugins/serverPluginRuntime.js";
+import type { WorkspaceCapabilityRegistry } from "./workspaceCapabilityRegistry.js";
 
 export type {
   WorkspaceProviderAuthorityResolution,
@@ -52,6 +53,8 @@ export type WorkspacePathInspector = (path: string) => boolean | Promise<boolean
 export interface WorkspaceProviderRegistryOptions {
   /** Active contributions from one immutable server-plugin runtime snapshot. */
   contributions: readonly ServerPluginProviderContribution[];
+  /** Non-owning capability registry attached to resolved workspace paths. */
+  capabilities: WorkspaceCapabilityRegistry;
   logger: WorkspaceProviderRegistryLogger;
   providerTimeoutMs?: number;
   /** End-to-end deadline for owner re-resolution plus one backend request. */
@@ -179,6 +182,7 @@ export function eligibleWorkspaceProviderContributions(
  */
 export class WorkspaceProviderRegistry {
   private readonly contributions: readonly ServerPluginProviderContribution[];
+  private readonly capabilities: WorkspaceCapabilityRegistry;
   private readonly providerTimeoutMs: number;
   private readonly requestTimeoutMs: number;
   private readonly pathInspector: WorkspacePathInspector;
@@ -187,6 +191,7 @@ export class WorkspaceProviderRegistry {
   constructor(private readonly options: WorkspaceProviderRegistryOptions) {
     this.contributions = Object.freeze([...options.contributions]
       .sort((left, right) => left.pluginId.localeCompare(right.pluginId)));
+    this.capabilities = options.capabilities;
     this.providerTimeoutMs = positiveInteger(options.providerTimeoutMs, DEFAULT_PROVIDER_TIMEOUT_MS, "providerTimeoutMs");
     this.requestTimeoutMs = positiveInteger(options.requestTimeoutMs, PLUGIN_BACKEND_DISPATCH_TIMEOUT_MS, "requestTimeoutMs");
     this.pathInspector = options.pathInspector ?? pathIsDirectory;
@@ -209,7 +214,7 @@ export class WorkspaceProviderRegistry {
     const existing = this.pendingResolutions.get(key);
     if (existing !== undefined) return existing;
 
-    const pending = this.resolveSnapshot(input);
+    const pending = this.resolveSnapshot(input).then((resolution) => this.attachCapabilities(resolution));
     this.pendingResolutions.set(key, pending);
     try {
       return await pending;
@@ -245,6 +250,22 @@ export class WorkspaceProviderRegistry {
       workspaces: Object.freeze([folderWorkspace(input)]),
       diagnostics: Object.freeze([...diagnostics]),
     });
+  }
+
+  /**
+   * Attach non-owning capabilities to every resolved workspace path, including
+   * folder workspaces produced by ownerless and degraded resolutions, so the
+   * capability wire and the capability dispatch path always agree on which
+   * workspace paths carry capabilities.
+   */
+  private async attachCapabilities(resolution: WorkspaceProviderAuthorityResolution): Promise<WorkspaceProviderAuthorityResolution> {
+    const workspaces = await Promise.all(resolution.workspaces.map(async (workspace) => {
+      const attached = await this.capabilities.capabilitiesForPath(workspace.path);
+      if (attached.length === 0) return workspace;
+      const capabilities = Object.freeze(attached.map(({ pluginId, id }) => Object.freeze({ pluginId, id })));
+      return Object.freeze({ ...workspace, capabilities });
+    }));
+    return Object.freeze({ ...resolution, workspaces: Object.freeze(workspaces) });
   }
 
   /**
@@ -384,17 +405,6 @@ export class WorkspaceProviderRegistry {
 
     const operation = parseRequestOperation(request.operation);
     const moduleRevision = parseRequestRevision(request.moduleRevision, operation);
-    const activeContribution = this.contributions.find((contribution) => contribution.pluginId === pluginId);
-    if (activeContribution === undefined) {
-      throw providerRequestError("inactive-plugin", 409, `Server plugin ${pluginId} is not active for workspace backend operation ${operation}`);
-    }
-    if (activeContribution.moduleRevision !== moduleRevision) {
-      throw providerRequestError(
-        "stale-plugin-revision",
-        409,
-        `Server plugin ${pluginId} backend revision is stale for operation ${operation}; reload after the session daemon restarts`,
-      );
-    }
     if (request.workspaceId === "") {
       throw providerRequestError("workspace-not-found", 404, `Workspace not found for server plugin ${pluginId} operation ${operation}`);
     }
@@ -408,34 +418,73 @@ export class WorkspaceProviderRegistry {
 
     const project = snapshotProject(request.project);
     const diagnostics: WorkspaceProviderDiagnostic[] = [];
+    let ownerContribution: ServerPluginProviderContribution | undefined;
+    let workspaces: ValidatedProviderWorkspace[] = [];
     for (const tier of ["primary", "fallback"] as const) {
       const selection = await this.selectInTier(project, tier, diagnostics, dispatchSignal);
       if (selection.kind === "none") continue;
       if (selection.kind === "conflict") {
-        throw providerRequestError(
-          "owner-conflict",
-          409,
-          `Workspace owner conflict prevents server plugin ${pluginId} operation ${operation}: ${selection.pluginIds.join(", ")}`,
-        );
+        if (selection.pluginIds.includes(pluginId)) {
+          throw providerRequestError(
+            "owner-conflict",
+            409,
+            `Workspace owner conflict prevents server plugin ${pluginId} operation ${operation}: ${selection.pluginIds.join(", ")}`,
+          );
+        }
+        // The requesting plugin is not a claimant, so this is a non-owner
+        // (capability) request. Ownership is degraded, but the capability can
+        // still dispatch against the kernel folder workspace below, matching
+        // the degraded folder workspace `resolve()` exposed for the conflict.
+        break;
       }
-      if (selection.contribution.pluginId !== pluginId) {
-        throw providerRequestError(
-          "owner-mismatch",
-          409,
-          `Server plugin ${pluginId} does not own project ${project.id}; current owner is ${selection.contribution.pluginId}`,
-        );
+      // The requesting plugin may not own the project; the owner is still
+      // listed so the shared workspace id resolves to a path the capability
+      // registry can dispatch against.
+      ownerContribution = selection.contribution;
+      try {
+        workspaces = await this.listRequestWorkspaces(project, selection.contribution, operation, dispatchSignal);
+      } catch (error) {
+        const ownerUnavailable = error instanceof WorkspaceProviderRequestError
+          && (error.code === "resolution-failed" || error.code === "resolution-timeout");
+        if (ownerUnavailable && selection.contribution.pluginId !== pluginId) {
+          // The owner is degraded (it claimed but could not list) while this is
+          // a non-owner capability request. Degrade to the kernel folder
+          // workspace so the capability can still dispatch, matching the
+          // degraded `resolve()` the client already observed.
+          ownerContribution = undefined;
+        } else {
+          throw error;
+        }
       }
+      break;
+    }
 
-      const validated = await this.listRequestWorkspaces(project, selection.contribution, operation, dispatchSignal);
-      const target = validated.find(({ workspace }) => workspace.id === request.workspaceId);
-      if (target === undefined) {
+    // No winner, a degraded owner, or a claim conflict: the project resolves to
+    // the kernel folder workspace, which still exposes the project path to
+    // capabilities.
+    if (ownerContribution === undefined) {
+      workspaces = [validatedFolderWorkspace(project)];
+    }
+
+    const target = workspaces.find(({ workspace }) => workspace.id === request.workspaceId);
+    if (target === undefined) {
+      throw providerRequestError(
+        "workspace-not-found",
+        404,
+        `Workspace ${request.workspaceId} is stale or unavailable for server plugin ${pluginId} operation ${operation}`,
+      );
+    }
+
+    // Owner dispatch: the requesting plugin must be the current owner.
+    if (ownerContribution?.pluginId === pluginId) {
+      if (ownerContribution.moduleRevision !== moduleRevision) {
         throw providerRequestError(
-          "workspace-not-found",
-          404,
-          `Workspace ${request.workspaceId} is stale or unavailable for server plugin ${pluginId} operation ${operation}`,
+          "stale-plugin-revision",
+          409,
+          `Server plugin ${pluginId} backend revision is stale for operation ${operation}; reload after the session daemon restarts`,
         );
       }
-      const callback = selection.contribution.provider.request?.bind(selection.contribution.provider);
+      const callback = ownerContribution.provider.request?.bind(ownerContribution.provider);
       if (callback === undefined) {
         throw providerRequestError(
           "operation-unavailable",
@@ -482,18 +531,29 @@ export class WorkspaceProviderRegistry {
       }
     }
 
-    const failedProbe = diagnostics.find((diagnostic) => diagnostic.pluginId === pluginId && diagnostic.code === "probe-failed");
-    if (failedProbe !== undefined) {
+    // Non-owner dispatch: the plugin can still serve this operation through a
+    // project capability it contributed on the resolved workspace path. This
+    // works for ownerless folder workspaces and for degraded ownership alike.
+    if (this.capabilities.hasContribution(pluginId)) {
+      return await this.capabilities.request({
+        pluginId,
+        moduleRevision,
+        workspacePath: target.workspace.path,
+        operation,
+        input,
+      }, dispatchSignal);
+    }
+    if (this.contributions.some((contribution) => contribution.pluginId === pluginId)) {
       throw providerRequestError(
-        "resolution-failed",
-        502,
-        `Server plugin ${pluginId} owner resolution failed for operation ${operation}: ${boundedErrorMessage(failedProbe.message)}`,
+        "owner-mismatch",
+        409,
+        `Server plugin ${pluginId} does not own project ${project.id}`,
       );
     }
     throw providerRequestError(
-      "owner-mismatch",
+      "inactive-plugin",
       409,
-      `Server plugin ${pluginId} does not own project ${project.id}`,
+      `Server plugin ${pluginId} is not active for workspace backend operation ${operation}`,
     );
   }
 
@@ -778,6 +838,19 @@ function folderWorkspace(project: ProjectInput): WorkspaceListing {
     path: project.path,
     label: project.name,
     isMain: true,
+  });
+}
+
+function validatedFolderWorkspace(project: ProjectInput): ValidatedProviderWorkspace {
+  const listing = folderWorkspace(project);
+  return Object.freeze({
+    workspace: listing,
+    providerWorkspace: Object.freeze({
+      key: project.path,
+      path: project.path,
+      label: listing.label,
+      isMain: true,
+    }),
   });
 }
 

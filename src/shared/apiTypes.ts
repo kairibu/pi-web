@@ -29,6 +29,7 @@ import type {
   WorkspaceRemovalPresentation,
   WriteWorkspaceFileOptions,
   WriteWorkspaceFileResponse,
+  WorkspaceCapability,
 } from "./pluginApiTypes.js";
 
 export type {
@@ -56,6 +57,7 @@ export type {
   TerminalCommandRun,
   TerminalCommandRunHandle,
   TerminalCommandRunStatus,
+  WorkspaceCapability,
   WorkspaceProviderCapabilities,
   WorkspaceProviderMetadata,
   WorkspaceRemovalPresentation,
@@ -383,6 +385,8 @@ export interface Workspace {
   readonly isMain: boolean;
   readonly provider?: WorkspaceProviderMetadata;
   readonly removal?: WorkspaceRemovalHostState;
+  /** Non-owning project capabilities attached to this workspace path. */
+  readonly capabilities?: readonly WorkspaceCapability[];
   /** Workspace-effective project/global settings needed by workspace UI features. Always present on current server workspace responses. */
   readonly effectiveConfig: WorkspaceEffectiveConfig;
 }
