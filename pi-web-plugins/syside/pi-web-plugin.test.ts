@@ -10,6 +10,7 @@ import type {
   WorkspacePanelContext,
 } from "@jmfederico/pi-web/plugin-api";
 import plugin from "./browser/pi-web-plugin.js";
+import { SYSIDE_SEARCH_DEBOUNCE_MS } from "./browser/syside-panel.js";
 
 const projectId = "project-1";
 const workspaceId = "workspace-1";
@@ -24,6 +25,7 @@ const sysideWorkspace: Workspace = {
 };
 
 afterEach(() => {
+  vi.useRealTimers();
   window.localStorage.clear();
   document.body.replaceChildren();
 });
@@ -229,6 +231,359 @@ describe("bundled SysIDE browser plugin", () => {
     expect(localBackend.request).toHaveBeenCalledTimes(2);
     render(null, container);
   });
+
+  it("opens the element view from the toolbar and closes back to the check content", async () => {
+    const backend = backendFixture();
+    const panel = requiredPanel(activate("syside"));
+    const context = panelContext(backend.request);
+    const container = document.createElement("div");
+    document.body.append(container);
+    render(panel.render(context), container);
+    await settleBackend();
+    render(panel.render(context), container);
+    expect([...container.querySelectorAll(".syside-error-message")].map((node) => node.textContent)).toEqual(["Unknown reference 'Wing'"]);
+
+    button(container, "Elements").click();
+    // Survey and the first unfiltered list request are issued immediately.
+    expect(backend.request).toHaveBeenCalledWith("survey", null);
+    expect(backend.request).toHaveBeenCalledWith("list-elements", null);
+    await settleBackend();
+    render(panel.render(context), container);
+
+    const submenu = container.querySelector(".syside-panel .syside-split .syside-elements-submenu");
+    if (submenu === null) throw new Error("Expected the element-view submenu inside .syside-split");
+    expect(submenu.querySelector("select[aria-label='Element type']")).not.toBeNull();
+    expect(submenu.querySelector("select[aria-label='Owning package']")).not.toBeNull();
+    expect(submenu.querySelector("input[type='search']")).not.toBeNull();
+
+    // The toolbar toggle closes the element view; the cached check content
+    // is restored unchanged (it is only hidden, never cleared).
+    button(container, "Elements").click();
+    await settleBackend();
+    render(panel.render(context), container);
+    expect(container.querySelector(".syside-panel .syside-split .syside-elements-submenu")).toBeNull();
+    expect([...container.querySelectorAll(".syside-error-message")].map((node) => node.textContent)).toEqual(["Unknown reference 'Wing'"]);
+    render(null, container);
+  });
+
+  it("lists surveyed packages in the owning-package dropdown", async () => {
+    const backend = backendFixture({ errors: [], survey: [packageFixture("m", ["m"]), packageFixture("Cabin", ["m", "Cabin"])] });
+    const panel = requiredPanel(activate("syside"));
+    const container = document.createElement("div");
+    await mountAndOpenElements(panel, backend, container);
+
+    const packageSelect = container.querySelector<HTMLSelectElement>("select[aria-label='Owning package']");
+    if (packageSelect === null) throw new Error("Expected an owning-package select");
+    expect([...packageSelect.options].map((option) => ({ label: option.textContent, value: option.value }))).toEqual([
+      { label: "All packages", value: "" },
+      { label: "m", value: '["m"]' },
+      { label: "Cabin", value: '["m","Cabin"]' },
+    ]);
+    render(null, container);
+  });
+
+  it("offers a packages-unavailable option when the survey request fails", async () => {
+    const backend = backendFixture({ errors: [], surveyFailures: 1 });
+    const panel = requiredPanel(activate("syside"));
+    const container = document.createElement("div");
+    await mountAndOpenElements(panel, backend, container);
+
+    const packageSelect = container.querySelector<HTMLSelectElement>("select[aria-label='Owning package']");
+    if (packageSelect === null) throw new Error("Expected an owning-package select");
+    expect([...packageSelect.options].map((option) => option.textContent)).toEqual(["Packages unavailable"]);
+    expect(packageSelect.disabled).toBe(true);
+    expect(container.querySelector(".syside-submenu-error")?.textContent).toContain("syside survey failed");
+    render(null, container);
+  });
+
+  it("filters by element type through the type dropdown", async () => {
+    const backend = backendFixture({ errors: [] });
+    const panel = requiredPanel(activate("syside"));
+    const container = document.createElement("div");
+    const context = await mountAndOpenElements(panel, backend, container);
+
+    const select = container.querySelector<HTMLSelectElement>("select[aria-label='Element type']");
+    if (select === null) throw new Error("Expected an element-type select");
+    select.value = "syside.PartUsage";
+    select.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+    await settleBackend();
+    render(panel.render(context), container);
+
+    expect(backend.request).toHaveBeenCalledWith("list-elements", { type: "syside.PartUsage" });
+    expect(backend.state.lastListInput).toEqual({ type: "syside.PartUsage" });
+    // The .value property binding keeps the selection across re-renders.
+    expect(select.value).toBe("syside.PartUsage");
+    render(null, container);
+  });
+  it("sends trimmed search text and drops whitespace-only searches", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const backend = backendFixture({ errors: [] });
+    const panel = requiredPanel(activate("syside"));
+    const container = document.createElement("div");
+    await mountAndOpenElements(panel, backend, container);
+
+    const input = container.querySelector<HTMLInputElement>("input[type='search']");
+    if (input === null) throw new Error("Expected a search input");
+    input.value = "  Wing  ";
+    input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    // Search refreshes are debounced; advance past the trailing edge.
+    await vi.advanceTimersByTimeAsync(SYSIDE_SEARCH_DEBOUNCE_MS + 1);
+    expect(backend.request).toHaveBeenCalledWith("list-elements", { search: "Wing" });
+
+    input.value = "   ";
+    input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    await vi.advanceTimersByTimeAsync(SYSIDE_SEARCH_DEBOUNCE_MS + 1);
+    expect(backend.request).toHaveBeenCalledWith("list-elements", null);
+    render(null, container);
+  });
+
+  it("debounces a keystroke burst into a single trailing list request", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const backend = backendFixture({ errors: [] });
+    const panel = requiredPanel(activate("syside"));
+    const container = document.createElement("div");
+    await mountAndOpenElements(panel, backend, container);
+
+    const listCalls = () => backend.request.mock.calls.filter(([operation]) => operation === "list-elements").length;
+    const before = listCalls();
+    const input = container.querySelector<HTMLInputElement>("input[type='search']");
+    if (input === null) throw new Error("Expected a search input");
+    for (const fragment of ["W", "Wi", "Win", "Wing"]) {
+      input.value = fragment;
+      input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    }
+    // Nothing was issued for the burst itself; only the open's initial request exists.
+    expect(listCalls()).toBe(before);
+    // The trailing debounce fires exactly one request for the final value.
+    await vi.advanceTimersByTimeAsync(SYSIDE_SEARCH_DEBOUNCE_MS - 1);
+    expect(listCalls()).toBe(before);
+    await vi.advanceTimersByTimeAsync(2);
+    expect(listCalls()).toBe(before + 1);
+    expect(backend.request).toHaveBeenLastCalledWith("list-elements", { search: "Wing" });
+    render(null, container);
+  });
+
+  it("composes type, package and search filters into one list request", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const backend = backendFixture({ errors: [], survey: [packageFixture("m", ["m"]), packageFixture("Cabin", ["m", "Cabin"])] });
+    const panel = requiredPanel(activate("syside"));
+    const container = document.createElement("div");
+    await mountAndOpenElements(panel, backend, container);
+
+    const packageSelect = container.querySelector<HTMLSelectElement>("select[aria-label='Owning package']");
+    if (packageSelect === null) throw new Error("Expected an owning-package select");
+    packageSelect.value = JSON.stringify(["m", "Cabin"]);
+    packageSelect.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+    await settleBackend();
+    expect(backend.request).toHaveBeenCalledWith("list-elements", { packageQualifiedName: ["m", "Cabin"] });
+
+    const typeSelect = container.querySelector<HTMLSelectElement>("select[aria-label='Element type']");
+    if (typeSelect === null) throw new Error("Expected an element-type select");
+    typeSelect.value = "syside.PartUsage";
+    typeSelect.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+    const searchInput = container.querySelector<HTMLInputElement>("input[type='search']");
+    if (searchInput === null) throw new Error("Expected a search input");
+    searchInput.value = "  Wing  ";
+    searchInput.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    // The type change refreshes immediately; the debounced search trails it
+    // with the final trimmed value.
+    await vi.advanceTimersByTimeAsync(SYSIDE_SEARCH_DEBOUNCE_MS + 1);
+
+    expect(backend.state.lastListInput).toEqual({
+      type: "syside.PartUsage",
+      packageQualifiedName: ["m", "Cabin"],
+      search: "Wing",
+    });
+    render(null, container);
+  });
+
+  it("loads and renders details for a selected list row", async () => {
+    const backend = backendFixture({
+      errors: [],
+      elements: [
+        elementFixture("syside.PartUsage", "Wing", ["m", "Wing"], null),
+        elementFixture("syside.PartDefinition", "Tail", ["m", "Tail"], null),
+      ],
+    });
+    const panel = requiredPanel(activate("syside"));
+    const container = document.createElement("div");
+    const context = await mountAndOpenElements(panel, backend, container);
+
+    expect([...container.querySelectorAll(".syside-element-row")]).toHaveLength(2);
+    button(container, "Wing").click();
+    expect(backend.request).toHaveBeenCalledWith("element-details", { qualifiedName: ["m", "Wing"] });
+    await settleBackend();
+    render(panel.render(context), container);
+
+    expect(container.querySelector(".syside-details-header strong")?.textContent).toBe("m::Wing");
+    expect(container.querySelector(".syside-details-filepath")?.textContent).toBe("/model/Model.sysml");
+    expect(container.querySelector(".syside-element-row.is-selected")).not.toBeNull();
+    render(null, container);
+  });
+
+  it("jumps to a related element's details via a heritage link", async () => {
+    const linkTarget: JsonValue = {
+      type: "syside.PartDefinition",
+      declared_name: "Tail",
+      qualified_name: ["m", "Tail"],
+      declared_short_name: null,
+      documentation: ["Tail docs."],
+      heritage: null,
+      subsetting: null,
+      filepath: "/model/Model.sysml",
+      subject: null,
+      inputs: null,
+      outputs: null,
+    };
+    const wingDetail: JsonValue = {
+      type: "syside.PartDefinition",
+      declared_name: "Wing",
+      qualified_name: ["m", "Wing"],
+      declared_short_name: null,
+      documentation: ["The wing."],
+      heritage: [elementFixture("syside.PartDefinition", "Tail", ["m", "Tail"], null)],
+      subsetting: null,
+      filepath: "/model/Model.sysml",
+      subject: null,
+      inputs: null,
+      outputs: null,
+    };
+    const backend = backendFixture({
+      errors: [],
+      elements: [elementFixture("syside.PartDefinition", "Wing", ["m", "Wing"], null)],
+      details: {
+        [JSON.stringify(["m", "Wing"])]: wingDetail,
+        [JSON.stringify(["m", "Tail"])]: linkTarget,
+      },
+    });
+    const panel = requiredPanel(activate("syside"));
+    const container = document.createElement("div");
+    const context = await mountAndOpenElements(panel, backend, container);
+
+    button(container, "Wing").click();
+    await settleBackend();
+    render(panel.render(context), container);
+    const link = container.querySelector<HTMLButtonElement>(".syside-link");
+    if (link === null) throw new Error("Expected a relationship link in the heritage section");
+    expect(link.title).toBe("m::Tail");
+    link.click();
+    expect(backend.request).toHaveBeenCalledWith("element-details", { qualifiedName: ["m", "Tail"] });
+    await settleBackend();
+    render(panel.render(context), container);
+
+    expect(container.querySelector(".syside-details-header strong")?.textContent).toBe("m::Tail");
+    expect(container.textContent).toContain("Tail docs.");
+    render(null, container);
+  });
+
+  it("switches between the textual and the diagram placeholder view", async () => {
+    const backend = backendFixture({
+      errors: [],
+      elements: [elementFixture("syside.PartUsage", "Wing", ["m", "Wing"], null)],
+    });
+    const panel = requiredPanel(activate("syside"));
+    const container = document.createElement("div");
+    const context = await mountAndOpenElements(panel, backend, container);
+    button(container, "Wing").click();
+    await settleBackend();
+    render(panel.render(context), container);
+
+    expect(container.querySelector(".syside-details-section")).not.toBeNull();
+    expect(container.querySelector(".syside-diagram-placeholder")).toBeNull();
+    const diagramButton = button(container, "Diagram");
+    expect(diagramButton.getAttribute("aria-pressed")).toBe("false");
+    diagramButton.click();
+    await settleBackend();
+    render(panel.render(context), container);
+    expect(container.querySelector(".syside-diagram-placeholder")?.textContent).toBe("Diagram view coming soon");
+    expect(container.querySelector(".syside-details-section")).toBeNull();
+    expect(button(container, "Diagram").getAttribute("aria-pressed")).toBe("true");
+    expect(button(container, "Text").getAttribute("aria-pressed")).toBe("false");
+
+    button(container, "Text").click();
+    await settleBackend();
+    render(panel.render(context), container);
+    expect(container.querySelector(".syside-diagram-placeholder")).toBeNull();
+    expect(container.querySelector(".syside-details-section")).not.toBeNull();
+    expect(button(container, "Diagram").getAttribute("aria-pressed")).toBe("false");
+
+    // Clicking the already-active segment must be a no-op (segmented-control
+    // semantics): the active Text button stays in text mode…
+    button(container, "Text").click();
+    await settleBackend();
+    render(panel.render(context), container);
+    expect(container.querySelector(".syside-details-section")).not.toBeNull();
+    expect(container.querySelector(".syside-diagram-placeholder")).toBeNull();
+    expect(button(container, "Text").getAttribute("aria-pressed")).toBe("true");
+    expect(button(container, "Diagram").getAttribute("aria-pressed")).toBe("false");
+
+    // …and the active Diagram button stays in diagram mode.
+    button(container, "Diagram").click();
+    await settleBackend();
+    render(panel.render(context), container);
+    expect(container.querySelector(".syside-diagram-placeholder")).not.toBeNull();
+    expect(container.querySelector(".syside-details-section")).toBeNull();
+    expect(button(container, "Diagram").getAttribute("aria-pressed")).toBe("true");
+    button(container, "Diagram").click();
+    await settleBackend();
+    render(panel.render(context), container);
+    expect(container.querySelector(".syside-diagram-placeholder")).not.toBeNull();
+    expect(button(container, "Diagram").getAttribute("aria-pressed")).toBe("true");
+    render(null, container);
+  });
+
+  it("keeps the latest list response when earlier requests resolve later", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const panel = requiredPanel(activate("syside"));
+    const pending = new Map<string, (value: JsonValue) => void>();
+    const request = vi.fn((operation: string, input: JsonValue): Promise<JsonValue> => {
+      if (operation === "check") return Promise.resolve({ errors: [] });
+      if (operation === "survey") return Promise.resolve({ projectPath: "/model", packages: [] });
+      if (operation === "list-elements") {
+        const search = isRecord(input) && typeof input["search"] === "string" ? input["search"] : "";
+        return new Promise((resolve) => { pending.set(search, resolve); });
+      }
+      return Promise.reject(new Error(`Unexpected operation: ${operation}`));
+    });
+    const context = panelContext(request);
+    const container = document.createElement("div");
+    document.body.append(container);
+    render(panel.render(context), container);
+    await settleBackend();
+    render(panel.render(context), container);
+    button(container, "Elements").click();
+    await settleBackend();
+    render(panel.render(context), container);
+
+    const searchInput = container.querySelector<HTMLInputElement>("input[type='search']");
+    if (searchInput === null) throw new Error("Expected a search input");
+    searchInput.value = "A";
+    searchInput.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    await vi.advanceTimersByTimeAsync(SYSIDE_SEARCH_DEBOUNCE_MS + 1);
+    searchInput.value = "AB";
+    searchInput.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    await vi.advanceTimersByTimeAsync(SYSIDE_SEARCH_DEBOUNCE_MS + 1);
+
+    const resolveA = pending.get("A");
+    const resolveAB = pending.get("AB");
+    if (resolveA === undefined || resolveAB === undefined) throw new Error("Expected two pending list requests");
+    // The newer request settles first; the earlier one only resolves afterwards.
+    resolveAB([elementFixture("syside.PartUsage", "Wing-AB", ["m", "Wing-AB"], null)]);
+    await settleBackend();
+    render(panel.render(context), container);
+    expect([...container.querySelectorAll(".syside-element-name")].map((node) => node.textContent)).toEqual(["Wing-AB"]);
+
+    resolveA([elementFixture("syside.PartUsage", "Wing-A", ["m", "Wing-A"], null)]);
+    await settleBackend();
+    render(panel.render(context), container);
+    // The stale response must not clobber the list for the latest filter.
+    expect([...container.querySelectorAll(".syside-element-name")].map((node) => node.textContent)).toEqual(["Wing-AB"]);
+    // With no short name declared the short column stays empty so it does not
+    // duplicate the name column.
+    expect([...container.querySelectorAll(".syside-element-short")].map((node) => node.textContent)).toEqual([""]);
+    expect(request).toHaveBeenLastCalledWith("list-elements", { search: "AB" });
+    render(null, container);
+  });
 });
 
 function activate(pluginId: string, runtimePluginId = pluginId) {
@@ -241,20 +596,117 @@ function requiredPanel(contributions: ReturnType<typeof activate>) {
   return panel;
 }
 
-function backendFixture(seed: { errors?: string[] } = {}) {
-  const state = {
+/** Mutable state shared by the fake backend and the assertions. */
+interface BackendFixtureState {
+  errors: string[];
+  failures: number;
+  surveyFailures: number;
+  lastListInput: JsonValue | undefined;
+}
+
+interface BackendFixtureSeed {
+  errors?: string[];
+  failures?: number;
+  surveyFailures?: number;
+  survey?: JsonValue[];
+  elements?: JsonValue[];
+  details?: Record<string, JsonValue>;
+}
+
+// The element-details fallback: a full valid detail fixture the fake returns
+// for any qualified name the test did not seed explicitly.
+const defaultDetailFixture: JsonValue = {
+  type: "syside.PartUsage",
+  declared_name: "Wing",
+  qualified_name: ["m", "Wing"],
+  declared_short_name: null,
+  documentation: ["Syside default detail."],
+  heritage: null,
+  subsetting: null,
+  filepath: "/model/Model.sysml",
+  subject: null,
+  inputs: null,
+  outputs: null,
+};
+
+function backendFixture(seed: BackendFixtureSeed = {}) {
+  const state: BackendFixtureState = {
     errors: seed.errors ?? ["Unknown reference 'Wing'"],
-    failures: 0,
+    failures: seed.failures ?? 0,
+    surveyFailures: seed.surveyFailures ?? 0,
+    lastListInput: undefined,
   };
-  const request = vi.fn((operation: string): Promise<JsonValue> => {
-    if (operation !== "check") return Promise.reject(new Error(`Unexpected operation: ${operation}`));
-    if (state.failures > 0) {
-      state.failures -= 1;
-      return Promise.reject(new Error("syside check failed"));
+  const request = vi.fn((operation: string, input: JsonValue): Promise<JsonValue> => {
+    switch (operation) {
+      case "check":
+        if (state.failures > 0) {
+          state.failures -= 1;
+          return Promise.reject(new Error("syside check failed"));
+        }
+        return Promise.resolve({ errors: [...state.errors] });
+      case "survey":
+        if (state.surveyFailures > 0) {
+          state.surveyFailures -= 1;
+          return Promise.reject(new Error("syside survey failed"));
+        }
+        return Promise.resolve({ projectPath: "/model", packages: seed.survey ?? [] });
+      case "list-elements":
+        state.lastListInput = input;
+        return Promise.resolve(seed.elements ?? []);
+      case "element-details": {
+        const qualifiedName = isRecord(input) ? input["qualifiedName"] : undefined;
+        if (Array.isArray(qualifiedName)) {
+          const found = seed.details?.[JSON.stringify(qualifiedName)];
+          if (found !== undefined) return Promise.resolve(found);
+        }
+        return Promise.resolve(defaultDetailFixture);
+      }
+      default:
+        return Promise.reject(new Error(`Unexpected operation: ${operation}`));
     }
-    return Promise.resolve({ errors: [...state.errors] });
   });
   return { request, state };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function elementFixture(type: string, declared_name: string, qualified_name: string[], declared_short_name: string | null): JsonValue {
+  return { type, declared_name, qualified_name, declared_short_name };
+}
+
+function packageFixture(declared_name: string, qualified_name: string[]): JsonValue {
+  return {
+    declared_name,
+    qualified_name,
+    element_counts: {
+      "syside.PartUsage": 1,
+      "syside.PartDefinition": 0,
+      "syside.RequirementUsage": 0,
+      "syside.RequirementDefinition": 0,
+      "syside.ActionUsage": 0,
+      "syside.ActionDefinition": 0,
+    },
+  };
+}
+
+async function mountAndOpenElements(
+  panel: ReturnType<typeof requiredPanel>,
+  backend: ReturnType<typeof backendFixture>,
+  container: HTMLElement,
+): Promise<WorkspacePanelContext> {
+  // Connect (auto-check) + render the initial check result, then open the
+  // element view through the toolbar button and render the settled element view.
+  const context = panelContext(backend.request);
+  document.body.append(container);
+  render(panel.render(context), container);
+  await settleBackend();
+  render(panel.render(context), container);
+  button(container, "Elements").click();
+  await settleBackend();
+  render(panel.render(context), container);
+  return context;
 }
 
 function panelContext(request: WorkspaceBackend["request"] | undefined, workspace = sysideWorkspace, machineId = "local", hostRequestRender: () => void = () => undefined): WorkspacePanelContext {

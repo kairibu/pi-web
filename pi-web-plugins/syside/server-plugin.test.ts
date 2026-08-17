@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { Readable, Writable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   ProjectCapability,
@@ -13,8 +14,10 @@ import { createServerPluginExecFile } from "../../src/server/plugins/serverPlugi
 import type { ServerPluginCapabilityContribution, ServerPluginProviderContribution } from "../../src/server/plugins/serverPluginRuntime.js";
 import { WorkspaceCapabilityRegistry } from "../../src/server/workspaces/workspaceCapabilityRegistry.js";
 import { WorkspaceProviderRegistry } from "../../src/server/workspaces/workspaceProviderRegistry.js";
-import { SYSIDE_CHECK_OPERATION } from "./syside-backend.js";
-import plugin, { SYSIDE_CAPABILITY_ID } from "./server-plugin.js";
+import { SYSIDE_CHECK_OPERATION, SYSIDE_SURVEY_OPERATION } from "./syside-backend.js";
+import { SysideModelService } from "./syside-model.js";
+import type { SysideWorkerProcess } from "./syside-worker-client.js";
+import plugin, { SYSIDE_CAPABILITY_ID, createSysideCapability } from "./server-plugin.js";
 import gitPlugin from "../git/server-plugin.js";
 
 const tempRoots: string[] = [];
@@ -77,20 +80,12 @@ describe("bundled SysIDE project capability", () => {
     expect(resolution.workspaces[0]).toHaveProperty("provider");
   });
 
-  it("serves the check schema through the host registry as a non-owner capability and passes the discovered files to syside", async () => {
+  it("serves the check schema through the host registry as a non-owner capability and loads the discovered files into the Python worker", async () => {
     const repository = await createRepository("registry sysml");
     await mkdir(join(repository.path, "parts"), { recursive: true });
     await writeFile(join(repository.path, "Model.sysml"), "package m;\n", "utf8");
     await writeFile(join(repository.path, "parts", "Wing.sysml"), "", "utf8");
-    const execFile = vi.fn<ServerPluginActivationContext["execFile"]>(() => Promise.resolve({
-      exitCode: 0,
-      signal: null,
-      stdout: "Model.sysml:1:1: error: Broken model\n",
-      stderr: "",
-      stdoutTruncated: false,
-      stderrTruncated: false,
-    }));
-    const sysideCapability = await capabilityFor(execFile);
+    const { sysideCapability, worker } = capabilityWithFakeWorker({ errors: ["Broken model"] });
     const gitProvider = await gitProviderFor();
     const registry = registryWith(gitProvider, sysideCapability);
     const input = project(repository.path);
@@ -109,11 +104,12 @@ describe("bundled SysIDE project capability", () => {
     });
 
     expect(result).toEqual({ errors: ["Broken model"] });
-    expect(execFile).toHaveBeenCalledWith(expect.objectContaining({
-      file: "syside",
-      args: ["check", "--", "Model.sysml", "parts/Wing.sysml"],
-      cwd: repository.path,
-    }));
+    const load = worker.requests.find((request) => request.op === "load");
+    expect(load).toMatchObject({
+      op: "load",
+      payload: { paths: [join(repository.path, "Model.sysml"), join(repository.path, "parts", "Wing.sysml")] },
+    });
+    expect(worker.requests.some((request) => request.op === "check")).toBe(true);
   });
 
   it("does not dispatch the capability for a workspace where SysML discovery finds nothing", async () => {
@@ -137,6 +133,32 @@ describe("bundled SysIDE project capability", () => {
       operation: SYSIDE_CHECK_OPERATION,
       input: null,
     })).rejects.toMatchObject({ code: "operation-unavailable", statusCode: 501 });
+  });
+
+  it("serves the survey through the host registry and injects the workspace path into the worker response", async () => {
+    const repository = await createRepository("registry survey");
+    await writeFile(join(repository.path, "Model.sysml"), "package m;\n", "utf8");
+    const { sysideCapability, worker } = capabilityWithFakeWorker({ errors: [] });
+    const gitProvider = await gitProviderFor();
+    const registry = registryWith(gitProvider, sysideCapability);
+    const input = project(repository.path);
+
+    const resolution = await registry.resolve(input);
+    const workspaceId = resolution.workspaces[0]?.id;
+    if (workspaceId === undefined) throw new Error("Expected Git workspace");
+
+    const result = await registry.request({
+      pluginId: "syside",
+      moduleRevision: "1",
+      project: input,
+      workspaceId,
+      operation: SYSIDE_SURVEY_OPERATION,
+      input: null,
+    });
+
+    expect(result).toEqual({ projectPath: repository.path, packages: [] });
+    const survey = worker.requests.find((request) => request.op === "survey");
+    expect(survey).toMatchObject({ op: "survey", payload: null });
   });
 
   it("rejects unsupported operations before invoking a command", async () => {
@@ -193,6 +215,115 @@ async function capabilityFor(execFile: ServerPluginActivationContext["execFile"]
   const capability = activation.capabilities?.[0];
   if (capability === undefined) throw new Error("Bundled SysIDE did not activate its project capability");
   return capability;
+}
+
+/**
+ * Build the capability over a model service backed by a fake Python worker, so
+ * registry dispatch can be exercised without a Python interpreter.
+ */
+function capabilityWithFakeWorker(behaviour: { errors: string[] }): {
+  sysideCapability: ProjectCapability;
+  worker: FakeSysideWorker;
+} {
+  const worker = new FakeSysideWorker(behaviour);
+  const service = new SysideModelService({
+    workerScriptPath: resolve("pi-web-plugins/syside/worker/syside_worker.py"),
+    logger: {
+      debug() { /* no-op */ },
+      info() { /* no-op */ },
+      warn() { /* no-op */ },
+      error() { /* no-op */ },
+    },
+    spawner: () => worker,
+  });
+  return { sysideCapability: createSysideCapability(service), worker };
+}
+
+/** Minimal NDJSON worker fake answering load, check, survey, and the element operations. */
+class FakeSysideWorker implements SysideWorkerProcess {
+  readonly pid = 9001;
+  readonly requests: { id: number; op: string; payload: unknown }[] = [];
+  readonly killedSignals: NodeJS.Signals[] = [];
+  readonly stdin = new Writable({
+    write: (chunk: unknown, _encoding, callback) => {
+      for (const line of String(chunk).split(/\r?\n/u)) {
+        if (line.trim() === "") continue;
+        const request = requireFakeWorkerRequest(JSON.parse(line));
+        this.requests.push(request);
+        this.respond(request);
+      }
+      callback();
+    },
+  });
+  readonly stdout = new Readable({ read: () => undefined });
+  readonly stderr = new Readable({ read: () => undefined });
+  private readonly exitListeners: ((code: number | null, signal: NodeJS.Signals | null) => void)[] = [];
+  private readonly errorListeners: ((error: Error) => void)[] = [];
+
+  constructor(private readonly behaviour: { errors: string[] }) {}
+
+  onExit(listener: (code: number | null, signal: NodeJS.Signals | null) => void): void {
+    this.exitListeners.push(listener);
+  }
+
+  onError(listener: (error: Error) => void): void {
+    this.errorListeners.push(listener);
+  }
+
+  kill(signal: NodeJS.Signals): boolean {
+    this.killedSignals.push(signal);
+    return true;
+  }
+
+  private respond(request: { id: number; op: string; payload: unknown }): void {
+    let result: unknown;
+    switch (request.op) {
+      case "load":
+        result = { files: 1 };
+        break;
+      case "check":
+        result = { errors: this.behaviour.errors };
+        break;
+      case "survey":
+        result = { projectPath: "", packages: [] };
+        break;
+      case "list_elements":
+        result = [];
+        break;
+      case "element_details":
+        result = {
+          type: "syside.PartDefinition",
+          declared_name: "Wing",
+          qualified_name: ["m", "Wing"],
+          declared_short_name: null,
+          documentation: null,
+          heritage: null,
+          subsetting: null,
+          filepath: "/repo/Model.sysml",
+          subject: null,
+          inputs: null,
+          outputs: null,
+        };
+        break;
+      default:
+        result = { errors: this.behaviour.errors };
+    }
+    this.stdout.push(`${JSON.stringify({ id: request.id, ok: true, result })}\n`);
+  }
+}
+
+function requireFakeWorkerRequest(value: unknown): { id: number; op: string; payload: unknown } {
+  if (!isRecord(value)) throw new Error("worker request must be an object");
+  const id = value["id"];
+  const op = value["op"];
+  const payload = value["payload"];
+  if (typeof id !== "number" || !Number.isInteger(id)) throw new Error("worker request id must be an integer");
+  if (typeof op !== "string") throw new Error("worker request op must be a string");
+  return { id, op, payload };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function gitProviderFor(): Promise<WorkspaceProvider> {

@@ -413,7 +413,7 @@ import type { PiWebServerPlugin, WorkspaceProvider } from "@jmfederico/pi-web/se
               <p>
                 <strong>SysIDE</strong> is enabled by default and attaches a non-owning project capability to every
                 workspace whose path contains <code>*.sysml</code> files. It adds a <strong>SysIDE</strong> workspace
-                panel that shows the error messages reported by <code>syside check</code> over those files.
+                panel that shows the error messages reported by the persistent SysIDE model worker over those files.
               </p>
               <ul>
                 <li>Plugin id: <code>syside</code></li>
@@ -428,10 +428,34 @@ import type { PiWebServerPlugin, WorkspaceProvider } from "@jmfederico/pi-web/se
                   project; any workspace that contains at least one file is attached the <code>workspace.sysml</code>
                   capability, including Git worktrees and ownerless folder workspaces.
                 </li>
-                <li>Implements one <code>check</code> backend operation returning <code>{ errors: string[] }</code>; no SysML files or a clean check returns an empty list.</li>
+                <li>
+                  Served by one persistent Python worker that imports the installed <code>syside</code> package once
+                  and keeps exactly one model loaded at a time. The model is loaded lazily on the first capability
+                  request for a workspace, replaced when the selected workspace or its SysML sources change, and never
+                  kept warm for more than one workspace at a time; the plugin watches the active workspace and
+                  re-compares the source manifest on every request, so editing or adding SysML files reloads the model
+                  before the next operation.
+                </li>
+                <li>
+                  Exposes <code>check</code> (an empty SysML result or a clean check returns
+                  <code>{ errors: [] }</code>), <code>survey</code> (per-package element counts),
+                  <code>list-elements</code> (filtered by element type, owning package, and name
+                  search), and <code>element-details</code> (full element detail keyed by qualified
+                  name) backend operations. A workspace without SysML files returns empty results
+                  without starting the worker.
+                </li>
+                <li>
+                  Requires Python 3 with the <code>syside</code> package installed on the machine running the session
+                  daemon; without it, capability requests fail with a clear error.
+                </li>
                 <li>The panel re-runs the check from its toolbar button and initially on connection, without polling or URL handling; backend failures render in a top-level alert.</li>
                 <li><strong>Go to SysIDE</strong> and <strong>Refresh SysIDE</strong> actions open the panel and re-run its check.</li>
-                <li>Disabling <code>syside</code> and restarting sessiond removes the capability and leaves the kernel folder workspace; reload the browser so SysIDE contributions disappear.</li>
+                <li>
+                  Disabling <code>syside</code> and restarting sessiond removes the capability and leaves the kernel
+                  folder workspace; reload the browser so SysIDE contributions disappear. Because the plugin is owned
+                  by the session daemon, server-plugin updates require a manual
+                  <code>systemctl --user restart pi-web-sessiond</code> followed by a browser reload.
+                </li>
               </ul>
 
               <h3>Updates</h3>

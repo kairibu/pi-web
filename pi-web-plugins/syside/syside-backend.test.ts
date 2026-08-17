@@ -1,201 +1,152 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import type {
-  ServerPluginActivationContext,
-  ServerPluginExecFileResult,
-} from "@jmfederico/pi-web/server-plugin-api";
+import { describe, expect, it, vi } from "vitest";
+import type { CapabilityRequestContext } from "@jmfederico/pi-web/server-plugin-api";
 import {
   SYSIDE_CHECK_OPERATION,
-  parseSysideErrors,
+  SYSIDE_ELEMENT_DETAILS_OPERATION,
+  SYSIDE_LIST_ELEMENTS_OPERATION,
+  SYSIDE_SURVEY_OPERATION,
   requestSysideCapability,
-  sysideCheck,
+  type SysideCapabilityService,
+  type SysideListElementsFilter,
 } from "./syside-backend.js";
 
-const tempRoots: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(tempRoots.splice(0).map((path) => rm(path, { recursive: true, force: true })));
-});
-
-describe("parseSysideErrors", () => {
-  it("extracts only error messages across supported diagnostic forms and strips ANSI", () => {
-    const stdout = [
-      "\u001B[1mModel.sysml:2:5: error: Unknown reference 'Wing'\u001B[0m",
-      "Model.sysml:10: error: Duplicate name 'Tail'",
-      "error: Missing default package",
-      "Model.sysml:3:1: warning: Redundant stereotype",
-      "info: parsed 2 files",
-      "",
-    ].join("\n");
-
-    expect(parseSysideErrors(stdout, "Model.sysml:4:2: error: Bad port type\n")).toEqual([
-      "Unknown reference 'Wing'",
-      "Duplicate name 'Tail'",
-      "Missing default package",
-      "Bad port type",
-    ]);
-  });
-
-  it("returns an empty list when there is no error output", () => {
-    expect(parseSysideErrors("check complete\n", "")).toEqual([]);
-    expect(parseSysideErrors("", "")).toEqual([]);
-  });
-});
-
-describe("sysideCheck", () => {
-  it("returns an empty error list without running a command when the project has no SysML files", async () => {
-    const folder = await temporaryDirectory("no sysml");
-    const execFile = vi.fn();
-    const context = contextWith(execFile);
-
-    await expect(sysideCheck(context, folder, new AbortController().signal)).resolves.toEqual({ errors: [] });
-    expect(execFile).not.toHaveBeenCalled();
-  });
-
-  it("runs syside check over the discovered files and parses error messages", async () => {
-    const folder = await temporaryDirectory("with sysml");
-    await writeFile(join(folder, "Model.sysml"), "package m;\n", "utf8");
-    const execFile = vi.fn<ServerPluginActivationContext["execFile"]>(() => Promise.resolve(commandResult({
-      stdout: "Model.sysml:1:1: error: Parse failure\n",
-    })));
-
-    await expect(sysideCheck(contextWith(execFile), folder, new AbortController().signal))
-      .resolves.toEqual({ errors: ["Parse failure"] });
-
-    expect(execFile).toHaveBeenCalledWith(expect.objectContaining({
-      file: "syside",
-      args: ["check", "--", "Model.sysml"],
-      cwd: folder,
-      timeoutMs: 30_000,
-    }));
-  });
-
-  it("separates discovered files from options with `--` so a leading-dash filename is a positional", async () => {
-    const folder = await temporaryDirectory("dash path");
-    await writeFile(join(folder, "-leading.sysml"), "", "utf8");
-    const execFile = vi.fn<ServerPluginActivationContext["execFile"]>(() => Promise.resolve(commandResult({})));
-
-    await sysideCheck(contextWith(execFile), folder, new AbortController().signal);
-    expect(execFile).toHaveBeenCalledWith(expect.objectContaining({ args: ["check", "--", "-leading.sysml"] }));
-  });
-
-  it("treats a non-zero exit with no parseable errors as a transport failure instead of reporting a clean project", async () => {
-    const folder = await temporaryDirectory("nonzero");
-    await writeFile(join(folder, "Model.sysml"), "", "utf8");
-    const execFile = () => Promise.resolve(commandResult({ exitCode: 1, stderr: "panic: missing variant\n" }));
-
-    await expect(sysideCheck(contextWith(execFile), folder, new AbortController().signal))
-      .rejects.toThrow(/exited with status 1/);
-    await expect(sysideCheck(contextWith(execFile), folder, new AbortController().signal))
-      .rejects.toThrow(/panic: missing variant/);
-  });
-
-  it("still reports parsed errors when the check exits non-zero (errors printed, not a crash)", async () => {
-    const folder = await temporaryDirectory("nonzero errors");
-    await writeFile(join(folder, "Model.sysml"), "", "utf8");
-    const execFile = () => Promise.resolve(commandResult({
-      exitCode: 1,
-      stdout: "Model.sysml:2:5: error: Unknown reference 'Wing'\n",
-    }));
-
-    await expect(sysideCheck(contextWith(execFile), folder, new AbortController().signal))
-      .resolves.toEqual({ errors: ["Unknown reference 'Wing'"] });
-  });
-
-  it("propagates a signaled command as a transport failure", async () => {
-    const folder = await temporaryDirectory("signal");
-    await writeFile(join(folder, "Model.sysml"), "", "utf8");
-    const execFile = () => Promise.resolve(commandResult({ exitCode: null, signal: "SIGKILL" }));
-
-    await expect(sysideCheck(contextWith(execFile), folder, new AbortController().signal))
-      .rejects.toThrow("ended from signal SIGKILL");
-  });
-
-  it("propagates truncated output and command timeout rejections as transport failures", async () => {
-    const folder = await temporaryDirectory("transport");
-    await writeFile(join(folder, "Model.sysml"), "", "utf8");
-    const truncated = () => Promise.resolve(commandResult({ stdout: "error: x", stdoutTruncated: true }));
-    await expect(sysideCheck(contextWith(truncated), folder, new AbortController().signal))
-      .rejects.toThrow("exceeded the host output limit");
-
-    const timeout = new Error("Server plugin command timed out after 30000ms");
-    const timingOut = () => Promise.reject(timeout);
-    await expect(sysideCheck(contextWith(timingOut), folder, new AbortController().signal)).rejects.toBe(timeout);
-  });
-});
-
-describe("requestSysideCapability", () => {
-  it("rejects unsupported operations and malformed check input before running a command", async () => {
-    const execFile = vi.fn();
-    const context = contextWith(execFile);
-    const base = {
-      workspace: { path: "/repo" },
-      signal: new AbortController().signal,
-    };
-
-    await expect(requestSysideCapability(context, { ...base, operation: "history", input: null }))
-      .rejects.toThrow("Unsupported SysIDE capability operation");
-    await expect(requestSysideCapability(context, { ...base, operation: SYSIDE_CHECK_OPERATION, input: {} }))
-      .rejects.toThrow("SysIDE check input must be null");
-    expect(execFile).not.toHaveBeenCalled();
-  });
-
-  it("returns the parsed check response for the requested operation", async () => {
-    const folder = await temporaryDirectory("requested operation");
-    await writeFile(join(folder, "Model.sysml"), "package m;\n", "utf8");
-    const execFile = vi.fn<ServerPluginActivationContext["execFile"]>(() => Promise.resolve(commandResult({
-      stdout: "error: Broken element\n",
-    })));
-
-    const result = await requestSysideCapability(contextWith(execFile), {
-      workspace: { path: folder },
-      operation: SYSIDE_CHECK_OPERATION,
-      input: null,
-      signal: new AbortController().signal,
-    });
-
-    expect(result).toEqual({ errors: ["Broken element"] });
-    expect(execFile).toHaveBeenCalledWith(expect.objectContaining({
-      file: "syside",
-      args: ["check", "--", "Model.sysml"],
-      cwd: folder,
-    }));
-  });
-});
-
-async function temporaryDirectory(label: string): Promise<string> {
-  const path = await mkdtemp(join(tmpdir(), `pi-web-syside-backend-${label}-`));
-  tempRoots.push(path);
-  return path;
+interface ServiceCall {
+  operation: string;
+  workspacePath: string;
+  filters?: SysideListElementsFilter;
+  qualifiedName?: string[];
 }
 
-function contextWith(execFile: ServerPluginActivationContext["execFile"]): ServerPluginActivationContext {
-  return {
-    apiVersion: 1,
-    pluginId: "syside",
-    packageRoot: "pi-web-plugins/syside",
-    logger: {
-      debug() { /* no-op */ },
-      info() { /* no-op */ },
-      warn() { /* no-op */ },
-      error() { /* no-op */ },
-    },
-    settings: {},
-    execFile,
-    signal: new AbortController().signal,
+/** Fake single-model service recording the routed calls. */
+function fakeService(): { service: SysideCapabilityService; calls: ServiceCall[] } {
+  const calls: ServiceCall[] = [];
+  const emptySurvey = {
+    projectPath: "",
+    packages: [],
   };
+  const service: SysideCapabilityService = {
+    check: vi.fn((workspacePath: string) => {
+      calls.push({ operation: "check", workspacePath });
+      return Promise.resolve({ errors: ["Broken model"] });
+    }),
+    survey: vi.fn((workspacePath: string) => {
+      calls.push({ operation: "survey", workspacePath });
+      return Promise.resolve(emptySurvey);
+    }),
+    listElements: vi.fn((workspacePath: string, filters: SysideListElementsFilter) => {
+      calls.push({ operation: "list-elements", workspacePath, filters });
+      return Promise.resolve([]);
+    }),
+    elementDetails: vi.fn((workspacePath: string, qualifiedName: string[]) => {
+      calls.push({ operation: "element-details", workspacePath, qualifiedName });
+      return Promise.resolve({
+        type: "syside.PartDefinition",
+        declared_name: "Wing",
+        qualified_name: ["m", "Wing"],
+        declared_short_name: null,
+        documentation: null,
+        heritage: null,
+        subsetting: null,
+        filepath: "/repo/Model.sysml",
+        subject: null,
+        inputs: null,
+        outputs: null,
+      });
+    }),
+  };
+  return { service, calls };
 }
 
-function commandResult(overrides: Partial<ServerPluginExecFileResult> = {}): ServerPluginExecFileResult {
+function requestFor(overrides: Partial<CapabilityRequestContext>): CapabilityRequestContext {
   return {
-    exitCode: 0,
-    signal: null,
-    stdout: "",
-    stderr: "",
-    stdoutTruncated: false,
-    stderrTruncated: false,
+    workspace: { path: "/repo" },
+    operation: SYSIDE_CHECK_OPERATION,
+    input: null,
+    signal: new AbortController().signal,
     ...overrides,
   };
 }
+
+describe("requestSysideCapability", () => {
+  it("routes check to the service with a null input and returns the validated response", async () => {
+    const { service, calls } = fakeService();
+
+    const result = await requestSysideCapability(service, requestFor({ operation: SYSIDE_CHECK_OPERATION }));
+
+    expect(result).toEqual({ errors: ["Broken model"] });
+    expect(calls).toEqual([{ operation: "check", workspacePath: "/repo" }]);
+  });
+
+  it("routes survey to the service with a null input", async () => {
+    const { service, calls } = fakeService();
+
+    await requestSysideCapability(service, requestFor({ operation: SYSIDE_SURVEY_OPERATION, input: null }));
+
+    expect(calls).toEqual([{ operation: "survey", workspacePath: "/repo" }]);
+  });
+
+  it("routes list-elements to the service with empty filters when the input is null", async () => {
+    const { service, calls } = fakeService();
+
+    await requestSysideCapability(service, requestFor({ operation: SYSIDE_LIST_ELEMENTS_OPERATION, input: null }));
+
+    expect(calls).toEqual([{ operation: "list-elements", workspacePath: "/repo", filters: {} }]);
+  });
+
+  it("routes list-elements with a validated filter object", async () => {
+    const { service, calls } = fakeService();
+
+    await requestSysideCapability(service, requestFor({
+      operation: SYSIDE_LIST_ELEMENTS_OPERATION,
+      input: { type: "syside.PartUsage", packageQualifiedName: ["m"], search: "win", unknownKey: "ignored" },
+    }));
+
+    expect(calls).toEqual([{
+      operation: "list-elements",
+      workspacePath: "/repo",
+      filters: { type: "syside.PartUsage", packageQualifiedName: ["m"], search: "win" },
+    }]);
+  });
+
+  it("routes element-details to the service with the validated qualified name", async () => {
+    const { service, calls } = fakeService();
+
+    const result = await requestSysideCapability(service, requestFor({
+      operation: SYSIDE_ELEMENT_DETAILS_OPERATION,
+      input: { qualifiedName: ["m", "Wing"] },
+    }));
+
+    expect(result).toMatchObject({ type: "syside.PartDefinition", declared_name: "Wing" });
+    expect(calls).toEqual([{ operation: "element-details", workspacePath: "/repo", qualifiedName: ["m", "Wing"] }]);
+  });
+
+  it("rejects unsupported operations and malformed inputs before touching the service", async () => {
+    const { service, calls } = fakeService();
+
+    await expect(requestSysideCapability(service, requestFor({ operation: "history", input: null })))
+      .rejects.toThrow("Unsupported SysIDE capability operation: history");
+    await expect(requestSysideCapability(service, requestFor({ operation: SYSIDE_CHECK_OPERATION, input: {} })))
+      .rejects.toThrow("SysIDE check input must be null");
+    await expect(requestSysideCapability(service, requestFor({ operation: SYSIDE_SURVEY_OPERATION, input: {} })))
+      .rejects.toThrow("SysIDE survey input must be null");
+    await expect(requestSysideCapability(service, requestFor({ operation: SYSIDE_LIST_ELEMENTS_OPERATION, input: 1 })))
+      .rejects.toThrow("SysIDE list-elements input must be an object or null");
+    await expect(requestSysideCapability(service, requestFor({ operation: SYSIDE_LIST_ELEMENTS_OPERATION, input: { type: "syside.Part" } })))
+      .rejects.toThrow("SysIDE list-elements input type must be one of");
+    await expect(requestSysideCapability(service, requestFor({ operation: SYSIDE_LIST_ELEMENTS_OPERATION, input: { type: "" } })))
+      .rejects.toThrow("SysIDE list-elements input type must be one of");
+    await expect(requestSysideCapability(service, requestFor({ operation: SYSIDE_LIST_ELEMENTS_OPERATION, input: { packageQualifiedName: [] } })))
+      .rejects.toThrow("packageQualifiedName must be a non-empty array of non-empty strings");
+    await expect(requestSysideCapability(service, requestFor({ operation: SYSIDE_LIST_ELEMENTS_OPERATION, input: { packageQualifiedName: ["m", ""] } })))
+      .rejects.toThrow("packageQualifiedName must be a non-empty array of non-empty strings");
+    await expect(requestSysideCapability(service, requestFor({ operation: SYSIDE_LIST_ELEMENTS_OPERATION, input: { search: "" } })))
+      .rejects.toThrow("SysIDE list-elements input search must be a non-empty string");
+    await expect(requestSysideCapability(service, requestFor({ operation: SYSIDE_ELEMENT_DETAILS_OPERATION, input: null })))
+      .rejects.toThrow("SysIDE element-details input must be an object");
+    await expect(requestSysideCapability(service, requestFor({ operation: SYSIDE_ELEMENT_DETAILS_OPERATION, input: { qualifiedName: [] } })))
+      .rejects.toThrow("qualifiedName must be a non-empty array of non-empty strings");
+    await expect(requestSysideCapability(service, requestFor({ operation: SYSIDE_ELEMENT_DETAILS_OPERATION, input: { qualifiedName: ["m", 7] } })))
+      .rejects.toThrow("qualifiedName must be a non-empty array of non-empty strings");
+    expect(calls).toEqual([]);
+  });
+});

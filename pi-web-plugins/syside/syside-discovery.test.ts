@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { discoverSysmlFiles } from "./syside-discovery.js";
+import { discoverSysmlFiles, discoverSysmlManifest } from "./syside-discovery.js";
 
 const tempRoots: string[] = [];
 
@@ -105,6 +105,70 @@ describe("discoverSysmlFiles", () => {
     await symlink(outside, join(project, "linked-dir"));
 
     await expect(discoverSysmlFiles(project)).resolves.toEqual([]);
+  });
+});
+
+describe("discoverSysmlManifest", () => {
+  it("returns sorted relative and absolute files with a stable fingerprint", async () => {
+    const root = await temporaryDirectory("manifest");
+    await mkdir(join(root, "parts"), { recursive: true });
+    await writeFile(join(root, "Model.sysml"), "package m;\n", "utf8");
+    await writeFile(join(root, "parts", "Wing.sysml"), "package w;\n", "utf8");
+
+    const manifest = await discoverSysmlManifest(root);
+    expect(manifest.files).toEqual(["Model.sysml", "parts/Wing.sysml"]);
+    expect(manifest.absoluteFiles).toEqual([join(root, "Model.sysml"), join(root, "parts", "Wing.sysml")]);
+    expect(manifest.fingerprint.split("\n")).toHaveLength(2);
+    expect(manifest.fingerprint).toContain("Model.sysml:");
+    expect(manifest.fingerprint).toContain("parts/Wing.sysml:");
+    await expect(discoverSysmlManifest(root)).resolves.toEqual(manifest);
+  });
+
+  it("produces a stable fingerprint for an empty workspace", async () => {
+    const root = await temporaryDirectory("manifest empty");
+    const manifest = await discoverSysmlManifest(root);
+    expect(manifest).toEqual({ files: [], absoluteFiles: [], fingerprint: "" });
+  });
+
+  it("changes the fingerprint when a source file's content changes", async () => {
+    const root = await temporaryDirectory("manifest content");
+    await writeFile(join(root, "Model.sysml"), "package m;\n", "utf8");
+    const before = await discoverSysmlManifest(root);
+    await writeFile(join(root, "Model.sysml"), "package m { part def Wing; }\n", "utf8");
+    const after = await discoverSysmlManifest(root);
+
+    expect(after.files).toEqual(before.files);
+    expect(after.fingerprint).not.toBe(before.fingerprint);
+  });
+
+  it("reuses the safe discovery rules: skips .git and node_modules and does not escape via symlinks", async () => {
+    const base = await temporaryDirectory("manifest rules");
+    const root = join(base, "project");
+    const outside = join(base, "outside");
+    await mkdir(join(root, ".git"), { recursive: true });
+    await mkdir(join(root, "node_modules"), { recursive: true });
+    await mkdir(outside, { recursive: true });
+    await Promise.all([
+      writeFile(join(root, "Model.sysml"), "package m;\n", "utf8"),
+      writeFile(join(root, ".git", "ignored.sysml"), "", "utf8"),
+      writeFile(join(root, "node_modules", "lib.sysml"), "", "utf8"),
+      writeFile(join(outside, "secret.sysml"), "", "utf8"),
+    ]);
+    await symlink(join(outside, "secret.sysml"), join(root, "linked.sysml"));
+
+    const manifest = await discoverSysmlManifest(root);
+    expect(manifest.files).toEqual(["Model.sysml"]);
+    expect(manifest.absoluteFiles).toEqual([join(root, "Model.sysml")]);
+  });
+
+  it("honours an aborted signal", async () => {
+    const root = await temporaryDirectory("manifest abort");
+    await writeFile(join(root, "Model.sysml"), "", "utf8");
+    const preAborted = new AbortController();
+    preAborted.abort();
+
+    await expect(discoverSysmlManifest(root, preAborted.signal)).rejects.toMatchObject({ name: "AbortError" });
+    await expect(discoverSysmlManifest(root, new AbortController().signal)).resolves.toMatchObject({ files: ["Model.sysml"] });
   });
 });
 

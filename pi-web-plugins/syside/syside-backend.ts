@@ -2,129 +2,133 @@ import type {
   CapabilityRequestContext,
   JsonValue,
   ProviderResponse,
-  ServerPluginActivationContext,
 } from "@jmfederico/pi-web/server-plugin-api";
 import {
   SYSIDE_CHECK_OPERATION,
+  SYSIDE_ELEMENT_TYPES,
+  SYSIDE_ELEMENT_DETAILS_OPERATION,
+  SYSIDE_LIST_ELEMENTS_OPERATION,
+  SYSIDE_SURVEY_OPERATION,
   type SysideCheckResponse,
+  type SysideListElementsFilter,
+  type SysideSurveyResponse,
+  type SysMlElement,
+  type SysMlElementDetail,
 } from "./browser/syside-contract.js";
-import { discoverSysmlFiles } from "./syside-discovery.js";
 
-export { SYSIDE_CHECK_OPERATION } from "./browser/syside-contract.js";
-export type { SysideCheckResponse } from "./browser/syside-contract.js";
+export {
+  SYSIDE_CHECK_OPERATION,
+  SYSIDE_ELEMENT_TYPES,
+  SYSIDE_ELEMENT_DETAILS_OPERATION,
+  SYSIDE_LIST_ELEMENTS_OPERATION,
+  SYSIDE_SURVEY_OPERATION,
+} from "./browser/syside-contract.js";
+export type {
+  SysideCheckResponse,
+  SysideListElementsFilter,
+  SysideSurveyResponse,
+  SysMlElement,
+  SysMlElementDetail,
+} from "./browser/syside-contract.js";
 
-const SYSIDE_COMMAND_TIMEOUT_MS = 30_000;
-
-interface SysideCommandResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}
-
-/** Dispatch the SysIDE-owned check schema through the capability's request seam. */
-export async function requestSysideCapability(
-  activationContext: ServerPluginActivationContext,
-  request: CapabilityRequestContext,
-): Promise<ProviderResponse> {
-  if (request.operation !== SYSIDE_CHECK_OPERATION) {
-    throw new Error(`Unsupported SysIDE capability operation: ${request.operation}`);
-  }
-  requireCheckInput(request.input);
-  const response = await sysideCheck(activationContext, request.workspace.path, request.signal);
-  return { errors: response.errors };
-}
-
-export async function sysideCheck(
-  context: ServerPluginActivationContext,
-  cwd: string,
-  signal: AbortSignal,
-): Promise<SysideCheckResponse> {
-  const files = await discoverSysmlFiles(cwd, signal);
-  if (files.length === 0) return { errors: [] };
-  // `--` separates the positional file arguments from options so a discovered
-  // file whose name begins with `-` cannot be misread as a CLI flag.
-  const result = await runSyside(context, cwd, ["check", "--", ...files], signal);
-  const errors = parseSysideErrors(result.stdout, result.stderr);
-  if (errors.length === 0 && result.exitCode !== 0) {
-    // A non-zero exit that produced no parseable diagnostics is not a clean
-    // "no errors" result: it is a crash, panic, usage error, or an unexpected
-    // diagnostic format. Surface it as a transport failure instead of telling
-    // the user the project is clean.
-    throw sysideCheckFailure(result);
-  }
-  return { errors };
+/**
+ * The operation surface the backend needs from the single-model service, so
+ * routing tests can substitute a fake without a Python worker.
+ */
+export interface SysideCapabilityService {
+  check(workspacePath: string, signal: AbortSignal): Promise<SysideCheckResponse>;
+  survey(workspacePath: string, signal: AbortSignal): Promise<SysideSurveyResponse>;
+  listElements(workspacePath: string, filters: SysideListElementsFilter, signal: AbortSignal): Promise<SysMlElement[]>;
+  elementDetails(workspacePath: string, qualifiedName: string[], signal: AbortSignal): Promise<SysMlElementDetail>;
 }
 
 /**
- * Extract the message text of each `error:` diagnostic from a `syside check`
- * run, then return that list.
+ * Dispatch the SysIDE capability operations through the single-model service.
  *
- * The parser assumes the tool's human-readable diagnostic line shape, matching
- * any of:
- *
- * - `path:line:col: error: <message>`
- * - `path:line: error: <message>`
- * - `error: <message>`
- *
- * with or without leading ANSI color codes. Warnings, info, and other non-error
- * output are ignored, so an empty list means the project reported no errors
- * (guaranteed only while the tool keeps emitting the shape above; a format
- * drift that changes the `error:` prefix would silently turn real errors into
- * an empty list — sysideCheck guards against the crash/usage case by treating a
- * non-zero exit with zero parsed diagnostics as a transport failure).
+ * Public backend operation names use hyphens (`survey`, `list-elements`,
+ * `element-details`) because the host validates backend operation names and
+ * rejects underscores; they map to the Python worker's `survey`,
+ * `list_elements`, and `element_details` operations inside the service.
  */
-export function parseSysideErrors(stdout: string, stderr: string): string[] {
-  const errors: string[] = [];
-  for (const rawLine of `${stdout}\n${stderr}`.split(/\r?\n/u)) {
-    const line = stripAnsi(rawLine).trim();
-    if (line === "") continue;
-    const message = extractSysideError(line);
-    if (message !== undefined) errors.push(message);
+export async function requestSysideCapability(
+  service: SysideCapabilityService,
+  request: CapabilityRequestContext,
+): Promise<ProviderResponse> {
+  switch (request.operation) {
+    case SYSIDE_CHECK_OPERATION: {
+      requireNullInput(request.input, SYSIDE_CHECK_OPERATION);
+      return await service.check(request.workspace.path, request.signal);
+    }
+    case SYSIDE_SURVEY_OPERATION: {
+      requireNullInput(request.input, SYSIDE_SURVEY_OPERATION);
+      return await service.survey(request.workspace.path, request.signal);
+    }
+    case SYSIDE_LIST_ELEMENTS_OPERATION: {
+      const filters = requireListElementsInput(request.input);
+      return await service.listElements(request.workspace.path, filters, request.signal);
+    }
+    case SYSIDE_ELEMENT_DETAILS_OPERATION: {
+      const qualifiedName = requireElementDetailsInput(request.input);
+      return await service.elementDetails(request.workspace.path, qualifiedName, request.signal);
+    }
+    default:
+      throw new Error(`Unsupported SysIDE capability operation: ${request.operation}`);
   }
-  return errors;
 }
 
-function extractSysideError(line: string): string | undefined {
-  const withPosition = /^.+?:\d+:\d+:\s*error:\s*(.*)$/u.exec(line);
-  if (withPosition !== null) return withPosition[1] ?? "";
-  const withLine = /^.+?:\d+:\s*error:\s*(.*)$/u.exec(line);
-  if (withLine !== null) return withLine[1] ?? "";
-  const bare = /^error:\s*(.*)$/u.exec(line);
-  if (bare !== null) return bare[1] ?? "";
-  return undefined;
+function requireNullInput(input: JsonValue, operation: string): void {
+  if (input !== null) throw new Error(`SysIDE ${operation} input must be null`);
 }
 
-function sysideCheckFailure(result: SysideCommandResult): Error {
-  const detail = (result.stderr.trim() !== "" ? result.stderr : result.stdout).trim() || "no output";
-  return new Error(`syside check exited with status ${String(result.exitCode)} and reported no errors: ${detail}`);
-}
-
-function stripAnsi(value: string): string {
-  // eslint-disable-next-line no-control-regex
-  return value.replace(/\u001B\[[0-9;]*m/gu, "");
-}
-
-async function runSyside(
-  context: ServerPluginActivationContext,
-  cwd: string,
-  args: readonly string[],
-  signal: AbortSignal,
-): Promise<SysideCommandResult> {
-  const result = await context.execFile({
-    file: "syside",
-    args,
-    cwd,
-    timeoutMs: SYSIDE_COMMAND_TIMEOUT_MS,
-    signal,
-  });
-  if (result.signal !== null) throw new Error(`syside ${args.join(" ")} ended from signal ${result.signal}`);
-  if (result.stdoutTruncated || result.stderrTruncated) {
-    throw new Error(`syside ${args.join(" ")} exceeded the host output limit`);
+function requireListElementsInput(input: JsonValue): SysideListElementsFilter {
+  if (input === null) return {};
+  if (!isRecord(input)) throw new Error("SysIDE list-elements input must be an object or null");
+  const filters: SysideListElementsFilter = {};
+  const type = input["type"];
+  if (type !== undefined) {
+    if (typeof type !== "string" || type === "" || !isSupportedElementType(type)) {
+      throw new Error(`SysIDE list-elements input type must be one of: ${SYSIDE_ELEMENT_TYPES.join(", ")}`);
+    }
+    filters.type = type;
   }
-  if (result.exitCode === null) throw new Error(`syside ${args.join(" ")} ended without an exit code`);
-  return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+  const packageQualifiedName = input["packageQualifiedName"];
+  if (packageQualifiedName !== undefined) {
+    if (!isNonEmptyStringArray(packageQualifiedName)) {
+      throw new Error("SysIDE list-elements input packageQualifiedName must be a non-empty array of non-empty strings");
+    }
+    filters.packageQualifiedName = packageQualifiedName;
+  }
+  const search = input["search"];
+  if (search !== undefined) {
+    if (typeof search !== "string" || search === "") {
+      throw new Error("SysIDE list-elements input search must be a non-empty string");
+    }
+    filters.search = search;
+  }
+  return filters;
 }
 
-function requireCheckInput(input: JsonValue): void {
-  if (input !== null) throw new Error("SysIDE check input must be null");
+function requireElementDetailsInput(input: JsonValue): string[] {
+  if (!isRecord(input)) throw new Error("SysIDE element-details input must be an object");
+  const qualifiedName = input["qualifiedName"];
+  if (!isNonEmptyStringArray(qualifiedName)) {
+    throw new Error("SysIDE element-details input qualifiedName must be a non-empty array of non-empty strings");
+  }
+  return qualifiedName;
+}
+
+function isSupportedElementType(type: string): boolean {
+  return SYSIDE_ELEMENT_TYPES.some((candidate) => candidate === type);
+}
+
+function isNonEmptyStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value)
+    && value.length > 0
+    && value.every((entry) => typeof entry === "string" && entry !== "")
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

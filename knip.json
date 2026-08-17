@@ -14,5 +14,6 @@
     "extensions/**/*.ts",
     "pi-web-plugins/**/*.ts"
   ],
-  "ignoreExportsUsedInFile": true
+  "ignoreExportsUsedInFile": true,
+  "ignoreBinaries": ["python3"]
 }
