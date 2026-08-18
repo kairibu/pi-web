@@ -1,7 +1,8 @@
 import { Readable, Writable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { JsonValue } from "@jmfederico/pi-web/server-plugin-api";
-import { SysideWorkerClient, type SysideWorkerProcess } from "./syside-worker-client.js";
+import { SysideWorkerClient } from "./syside-worker-client.js";
+import type { SysideWorkerProcess } from "./syside-worker-process.js";
 
 interface FakeWorkerRequest {
   id: number;

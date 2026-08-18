@@ -13,11 +13,8 @@ import {
   type SysMlElementDetail,
 } from "./browser/syside-contract.js";
 import { discoverSysmlManifest, type SysideSourceManifest } from "./syside-discovery.js";
-import {
-  SysideWorkerClient,
-  type SysideWorkerClientOptions,
-  type SysideWorkerSpawner,
-} from "./syside-worker-client.js";
+import { SysideWorkerClient, type SysideWorkerClientOptions } from "./syside-worker-client.js";
+import type { SysideWorkerSpawner } from "./syside-worker-process.js";
 
 /** One active model slot: the workspace path, manifest, and worker generation it was loaded into. */
 interface ActiveModel {

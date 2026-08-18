@@ -9,7 +9,7 @@ import {
   type SysideWatcherFactory,
   type SysideWorkspaceWatcher,
 } from "./syside-model.js";
-import type { SysideWorkerProcess } from "./syside-worker-client.js";
+import type { SysideWorkerProcess } from "./syside-worker-process.js";
 
 const tempRoots: string[] = [];
 

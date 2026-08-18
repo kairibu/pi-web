@@ -6,14 +6,14 @@ const pluginRoot = "pi-web-plugins";
 /**
  * Exact one-file allowlist keyed by rule id (not by message text, so rewording
  * a diagnostic never silently disables an allowlist entry). Only
- * `node-child-process` has an entry: the persistent SysIDE Python worker client
- * is the only plugin module permitted to import `node:child_process`, because
- * the bounded `context.execFile()` helper is for one-shot commands and cannot
- * keep a bidirectional stdio worker alive. Everything else must keep using the
- * bounded server command helper.
+ * `node-child-process` has an entry: the persistent SysIDE Python worker spawn
+ * adapter in `syside-worker-process.ts` is the only plugin module permitted to
+ * import `node:child_process`, because the bounded `context.execFile()` helper
+ * is for one-shot commands and cannot keep a bidirectional stdio worker alive.
+ * Everything else must keep using the bounded server command helper.
  */
 const patternAllowlist: Record<string, ReadonlySet<string>> = {
-  "node-child-process": new Set(["pi-web-plugins/syside/syside-worker-client.ts"]),
+  "node-child-process": new Set(["pi-web-plugins/syside/syside-worker-process.ts"]),
 };
 const forbiddenPatterns = [
   { id: "fetch", pattern: /\bfetch\s*\(/u, message: "direct browser fetch" },

@@ -16,7 +16,7 @@ import { WorkspaceCapabilityRegistry } from "../../src/server/workspaces/workspa
 import { WorkspaceProviderRegistry } from "../../src/server/workspaces/workspaceProviderRegistry.js";
 import { SYSIDE_CHECK_OPERATION, SYSIDE_SURVEY_OPERATION } from "./syside-backend.js";
 import { SysideModelService } from "./syside-model.js";
-import type { SysideWorkerProcess } from "./syside-worker-client.js";
+import type { SysideWorkerProcess } from "./syside-worker-process.js";
 import plugin, { SYSIDE_CAPABILITY_ID, createSysideCapability } from "./server-plugin.js";
 import gitPlugin from "../git/server-plugin.js";
 

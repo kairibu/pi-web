@@ -8,16 +8,25 @@ protocol or adding a new operation.
 
 ## Architecture
 
-The stack has seven layers, each with one job. Data flows top to bottom:
+The stack is organized top to bottom; each module has one job. Data flows
+top to bottom:
 
 ```
-browser/syside-panel.ts          UI panel (Lit), talks to the host, not Python
-  └─ browser/syside-contract.ts  capability operation names + response parsers/types
-server-plugin.ts                 capability registration (`workspace.sysml`), lifecycle
-  └─ syside-backend.ts           routes capability operations to service methods
-    └─ syside-model.ts           SysideModelService: model lifecycle, reload, dirty tracking
-      └─ syside-worker-client.ts NDJSON framing, serialization, poisoning, respawn
-        └─ worker/syside_worker.py  persistent Python process, one loaded model
+browser/syside-panel.ts            wiring + shell (actions, panel, render dispatch)
+  ├─ browser/syside-panel-state.ts       per-workspace UI state + LRU retention
+  ├─ browser/syside-panel-controller.ts  request orchestration (check/survey/list/details, debounce)
+  ├─ browser/syside-panel-activity.ts    activity custom element
+  ├─ browser/syside-panel-styles.ts      panel CSS
+  ├─ browser/syside-panel-overview.ts    overview/check rendering
+  ├─ browser/syside-panel-elements.ts    elements view rendering
+  └─ browser/syside-contract.ts          capability operation names + response parsers/types
+server-plugin.ts                  capability registration (`workspace.sysml`), lifecycle
+  └─ syside-backend.ts            routes capability operations to service methods
+    └─ syside-model.ts            SysideModelService: model lifecycle, reload, dirty tracking
+      ├─ syside-worker-client.ts  request/queue/poison state machine (framing, serialization)
+      │   └─ syside-worker-protocol.ts   response parsing/validation
+      └─ syside-worker-process.ts node:child_process spawn adapter
+          └─ worker/syside_worker.py     persistent Python process, one loaded model
 ```
 
 Key design decisions (do not undo these casually):
@@ -30,7 +39,7 @@ Key design decisions (do not undo these casually):
   (`syside-model.ts`, `syncModel()`).
 - **One model slot.** The worker holds at most one model (`load` replaces it).
   A workspace switch reloads; there is no multi-model cache.
-- **`node:child_process` is allowed only in `syside-worker-client.ts`.**
+- **`node:child_process` is allowed only in `syside-worker-process.ts`.**
   `pluginPublicApi.test.ts` enforces this with an allowlist keyed by rule id
   (`node-child-process` → this one file). `context.execFile()` remains the
   boundary for every other plugin; a persistent bidirectional stdio worker
@@ -40,7 +49,7 @@ Key design decisions (do not undo these casually):
   manifest discovery and compares fingerprints (`syside-discovery.ts`,
   `path:size:mtimeMs:ctimeMs`) as the correctness fallback.
 
-### Worker client semantics (`syside-worker-client.ts`)
+### Worker client semantics (`syside-worker-client.ts`, parsing in `syside-worker-protocol.ts`)
 
 - Requests are serialized: one frame in flight, later requests queue.
 - A `{ ok: false }` Python response rejects only that request; the
@@ -77,9 +86,18 @@ Key design decisions (do not undo these casually):
 | Public capability operation names (hyphenated: `survey`, `list-elements`, `element-details`, …) | `browser/syside-contract.ts` (`SYSIDE_*_OPERATION` constants) |
 | Supported element type names (`SYSIDE_ELEMENT_TYPES`) | `browser/syside-contract.ts` (mirrored in the worker's `SYSIDE_TYPE_BY_NAME`) |
 | Response shapes/types + runtime parsers shared by browser and server | `browser/syside-contract.ts` |
+| Browser wiring: actions, panel registration, shell/toolbar/render dispatch | `browser/syside-panel.ts` (`createSysideActions`, `createSysidePanel`, `renderSysidePanel`) |
+| Per-workspace UI state + LRU retention policy | `browser/syside-panel-state.ts` (`SysideWorkspaceStateStore`, `SYSIDE_WORKSPACE_STATE_LIMIT`) |
+| Request orchestration (lifecycles, debounce, sequence guards) | `browser/syside-panel-controller.ts` (`SysideUiController`, `SYSIDE_SEARCH_DEBOUNCE_MS`) |
+| Activity custom element (connect/disconnect guards) | `browser/syside-panel-activity.ts` (`defineSysidePanelActivityElement`) |
+| Panel CSS string | `browser/syside-panel-styles.ts` (`sysidePanelStyles`) |
+| Overview/check rendering | `browser/syside-panel-overview.ts` |
+| Elements view rendering | `browser/syside-panel-elements.ts` |
 | Capability → service routing | `syside-backend.ts` (`requestSysideCapability`) |
 | Service API (model lifecycle, reload policy) | `syside-model.ts` (`SysideModelService`, injectable `spawner`/`clientFactory`/`watcherFactory`/`discovery`) |
-| NDJSON wire protocol (frame shape, poison rules, timeouts) | `syside-worker-client.ts` |
+| NDJSON response parsing/validation | `syside-worker-protocol.ts` (`WorkerResponse`, `parseWorkerResponse`, `requireJsonValue`) |
+| NDJSON framing, serialization, poisoning, respawn (client state machine) | `syside-worker-client.ts` |
+| Python process spawn abstraction | `syside-worker-process.ts` (`SysideWorkerProcess`, `SysideWorkerSpawner`, `spawnSysideWorkerProcess`) |
 | Python-side wire protocol + operations | `worker/syside_worker.py` (`ALLOWED_OPERATIONS`, `dispatch`, `respond`) |
 | SysML file discovery + fingerprint | `syside-discovery.ts` |
 | `node:child_process` allowlist | `pi-web-plugins/pluginPublicApi.test.ts` |
@@ -95,16 +113,18 @@ The NDJSON protocol is `{id, op, payload}` in, `{id, ok, result|error}` out,
 defined independently on both ends:
 
 - Python side: `dispatch()` / `respond()` in `worker/syside_worker.py`.
-- TypeScript side: `WorkerResponse` type and `parseWorkerResponse()` in
-  `syside-worker-client.ts`.
+- TypeScript side: `WorkerResponse` type and `parseWorkerResponse()` /
+  `requireJsonValue()` in `syside-worker-protocol.ts`, consumed by the
+  framing state machine in `syside-worker-client.ts`.
 
 Both ends must change together; the client poisons the worker on any
 malformed response, so a mismatch fails loudly (worker restart loop), not
 silently. Changing the frame envelope (`id`, `ok`, error shape) also affects
 `parseWorkerResponse()` validation and the framing tests in
-`syside-worker-client.test.ts`. Additive payload fields are the low-risk path;
-renames or removals need both ends plus the contract parsers updated in one
-change.
+`syside-worker-client.test.ts` plus the direct parser tests in
+`syside-worker-protocol.test.ts`. Additive payload fields are the low-risk
+path; renames or removals need both ends plus the contract parsers updated in
+one change.
 
 ## How to add a new operation
 
@@ -125,8 +145,10 @@ Checklist, in dependency order — one commit, all steps:
 4. **Routing** (`syside-backend.ts`): extend `SysideCapabilityService` with
    the new method and add a case in `requestSysideCapability()` with input
    validation (`requireNullInput` / a new `require…Input` helper).
-5. **UI** (`browser/syside-panel.ts`): consume the new operation through the
-   host capability request path only.
+5. **UI orchestration** (`browser/syside-panel-controller.ts`): consume the new
+   operation through the host capability request path only, and render it
+   through the view renderers (`browser/syside-panel-overview.ts` /
+   `browser/syside-panel-elements.ts`).
 6. **Tests**: `server-plugin.test.ts` / `syside-backend.test.ts` for routing,
    `syside-model.test.ts` for service behavior (use the injectable
    `clientFactory`/`spawner` fakes — no Python needed), and

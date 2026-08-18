@@ -1,0 +1,203 @@
+import type { HtmlTemplateTag, WorkspacePanelContext } from "@jmfederico/pi-web/plugin-api";
+import {
+  SYSIDE_ELEMENT_TYPES,
+  type SysMlElement,
+  type SysMlElementDetail,
+} from "./syside-contract.js";
+import {
+  elementDisplayName,
+  elementShortName,
+  elementTypeLabel,
+  qualifiedNameDisplay,
+  qualifiedNameKey,
+} from "./syside-elements-view.js";
+import type { SysideUiController } from "./syside-panel-controller.js";
+import type { SysideWorkspaceUiState } from "./syside-panel-state.js";
+
+export function renderElementView(html: HtmlTemplateTag, state: SysideWorkspaceUiState, controller: SysideUiController, context: WorkspacePanelContext) {
+  return html`
+    <section class="syside-elements">
+      ${renderElementsSubmenu(html, state, controller, context)}
+      <div class="syside-elements-body">
+        <div class="syside-elements-list">${renderElementList(html, state, controller, context)}</div>
+        <div class="syside-elements-details">${renderElementDetails(html, state, controller, context)}</div>
+      </div>
+    </section>
+  `;
+}
+
+function renderElementsSubmenu(html: HtmlTemplateTag, state: SysideWorkspaceUiState, controller: SysideUiController, context: WorkspacePanelContext) {
+  return html`
+    <div class="syside-elements-submenu">
+      <select
+        aria-label="Element type"
+        .value=${state.typeFilter ?? ""}
+        @change=${(event: Event) => {
+          if (!(event.target instanceof HTMLSelectElement)) return;
+          const value = event.target.value;
+          controller.setTypeFilter(context, value === "" ? undefined : value);
+        }}
+      >
+        <option value="">All types</option>
+        ${SYSIDE_ELEMENT_TYPES.map((type) => html`<option value=${type}>${elementTypeLabel(type)}</option>`)}
+      </select>
+      <select
+        aria-label="Owning package"
+        .value=${packageFilterSelectValue(state)}
+        ?disabled=${state.surveyLoading || state.surveyError !== undefined}
+        @change=${(event: Event) => {
+          if (!(event.target instanceof HTMLSelectElement)) return;
+          controller.setPackageFilter(context, packageNameFromSelectValue(event.target.value));
+        }}
+      >
+        ${state.surveyError !== undefined
+          ? html`<option value="">Packages unavailable</option>`
+          : state.survey === undefined || state.surveyLoading
+            ? html`<option value="">Loading packages…</option>`
+            : html`
+              <option value="">All packages</option>
+              ${state.survey.packages.map((pkg) => html`<option value=${JSON.stringify(pkg.qualified_name)}>${pkg.declared_name !== "" ? pkg.declared_name : qualifiedNameDisplay(pkg.qualified_name)}</option>`)}
+            `}
+      </select>
+      <input
+        type="search"
+        aria-label="Search elements"
+        placeholder="Search name…"
+        .value=${state.searchText}
+        @input=${(event: Event) => {
+          if (!(event.target instanceof HTMLInputElement)) return;
+          controller.setSearch(context, event.target.value);
+        }}
+      >
+      ${state.surveyError === undefined ? null : html`<span class="syside-submenu-error" role="alert">${state.surveyError}</span>`}
+    </div>
+  `;
+}
+
+function renderElementList(html: HtmlTemplateTag, state: SysideWorkspaceUiState, controller: SysideUiController, context: WorkspacePanelContext) {
+  if (state.listLoading && state.elements === undefined) return html`<p class="syside-muted">Loading elements…</p>`;
+  if (state.listError !== undefined) return html`<p class="syside-error-message">${state.listError}</p>`;
+  if (state.elements === undefined || state.elements.length === 0) return html`<p class="syside-muted">No elements.</p>`;
+  const selectedKey = state.selectedQualifiedName === undefined ? undefined : qualifiedNameKey(state.selectedQualifiedName);
+    return state.elements.map((element) => {
+    const shortName = elementShortName(element);
+    const isSelected = selectedKey === qualifiedNameKey(element.qualified_name);
+    const rowClass = `${isSelected ? "syside-element-row is-selected" : "syside-element-row"}${shortName ? " has-short" : ""}`;
+    return html`
+      <button
+        type="button"
+        class=${rowClass}
+        @click=${() => { controller.selectElement(context, element.qualified_name); }}
+      >
+        <span class="syside-element-type">${elementTypeLabel(element.type)}</span>
+        ${shortName ? html`<span class="syside-element-short">&lt;${shortName}&gt;</span>` : null}
+        <span class="syside-element-name">${element.declared_name}</span>
+        <span class="syside-element-qn">${qualifiedNameDisplay(element.qualified_name)}</span>
+      </button>
+    `;
+  });
+}
+
+function renderElementDetails(html: HtmlTemplateTag, state: SysideWorkspaceUiState, controller: SysideUiController, context: WorkspacePanelContext) {
+  if (state.selectedQualifiedName === undefined) return html`<p class="syside-muted">Select an element.</p>`;
+  if (state.detailsLoading) return html`<p class="syside-muted">Loading details…</p>`;
+  if (state.detailsError !== undefined) return html`<p class="syside-error-message">${state.detailsError}</p>`;
+  const details = state.details;
+  if (details === undefined) return null;
+  return html`
+    <header class="syside-details-header">
+      <strong>${qualifiedNameDisplay(details.qualified_name)}</strong>
+      <span class="syside-muted">${elementTypeLabel(details.type)}</span>
+      <small class="syside-details-filepath">${details.filepath}</small>
+    </header>
+    <div class="syside-view-toggle" role="group" aria-label="View mode">
+      <button
+        type="button"
+        class=${state.diagramMode ? "syside-view-button" : "syside-view-button is-selected"}
+        aria-pressed=${String(!state.diagramMode)}
+        @click=${() => { controller.setDiagramMode(context, false); }}
+      >Text</button>
+      <button
+        type="button"
+        class=${state.diagramMode ? "syside-view-button is-selected" : "syside-view-button"}
+        aria-pressed=${String(state.diagramMode)}
+        @click=${() => { controller.setDiagramMode(context, true); }}
+      >Diagram</button>
+    </div>
+    ${state.diagramMode
+      ? html`<div class="syside-diagram-placeholder">Diagram view coming soon</div>`
+      : renderTextualDetails(html, details, controller, context)}
+  `;
+}
+
+function renderTextualDetails(html: HtmlTemplateTag, details: SysMlElementDetail, controller: SysideUiController, context: WorkspacePanelContext) {
+  return html`
+    ${renderStringSection(html, "Documentation", details.documentation)}
+    ${renderElementListSection(html, "Heritage", details.heritage, controller, context)}
+    ${renderElementListSection(html, "Subsetting", details.subsetting, controller, context)}
+    ${renderElementSection(html, "Subject", details.subject, controller, context)}
+    ${renderElementListSection(html, "Inputs", details.inputs, controller, context)}
+    ${renderElementListSection(html, "Outputs", details.outputs, controller, context)}
+  `;
+}
+
+function renderStringSection(html: HtmlTemplateTag, label: string, values: string[] | null) {
+  return html`
+    <section class="syside-details-section">
+      <h3>${label}</h3>
+      ${values === null || values.length === 0
+        ? html`<p class="syside-muted">—</p>`
+        : html`${values.map((value) => html`<p>${value}</p>`)}`}
+    </section>
+  `;
+}
+
+function renderElementListSection(html: HtmlTemplateTag, label: string, elements: SysMlElement[] | null, controller: SysideUiController, context: WorkspacePanelContext) {
+  return html`
+    <section class="syside-details-section">
+      <h3>${label}</h3>
+      ${elements === null || elements.length === 0
+        ? html`<p class="syside-muted">—</p>`
+        : html`<ul>${elements.map((element) => renderElementLink(html, element, controller, context))}</ul>`}
+    </section>
+  `;
+}
+
+function renderElementSection(html: HtmlTemplateTag, label: string, element: SysMlElement | null, controller: SysideUiController, context: WorkspacePanelContext) {
+  return html`
+    <section class="syside-details-section">
+      <h3>${label}</h3>
+      ${element === null
+        ? html`<p class="syside-muted">—</p>`
+        : html`<ul>${renderElementLink(html, element, controller, context)}</ul>`}
+    </section>
+  `;
+}
+
+function renderElementLink(html: HtmlTemplateTag, element: SysMlElement, controller: SysideUiController, context: WorkspacePanelContext) {
+  return html`
+    <li>
+      <button
+        type="button"
+        class="syside-link"
+        title=${qualifiedNameDisplay(element.qualified_name)}
+        @click=${() => { controller.selectElement(context, element.qualified_name); }}
+      >${elementDisplayName(element)}</button>
+    </li>
+  `;
+}
+
+function packageFilterSelectValue(state: SysideWorkspaceUiState): string {
+  return state.packageFilter === undefined ? "" : JSON.stringify(state.packageFilter);
+}
+
+function packageNameFromSelectValue(value: string): string[] | undefined {
+  if (value === "") return undefined;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) && parsed.every((segment) => typeof segment === "string") ? parsed : undefined;
+  } catch {
+    // Only reachable for values the panel itself did not generate.
+    return undefined;
+  }
+}

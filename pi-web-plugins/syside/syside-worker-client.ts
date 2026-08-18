@@ -1,25 +1,7 @@
-import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { JsonValue } from "@jmfederico/pi-web/server-plugin-api";
-
-/**
- * Narrow stdio process abstraction used by the persistent SysIDE Python worker
- * client. The real implementation wraps one `child_process.spawn` result; tests
- * inject a fake so NDJSON framing, correlation, poisoning, and shutdown can be
- * exercised without a Python interpreter.
- */
-export interface SysideWorkerProcess {
-  readonly pid: number | undefined;
-  readonly stdin: NodeJS.WritableStream;
-  readonly stdout: NodeJS.ReadableStream;
-  readonly stderr: NodeJS.ReadableStream;
-  onExit(listener: (code: number | null, signal: NodeJS.Signals | null) => void): void;
-  onError(listener: (error: Error) => void): void;
-  kill(signal: NodeJS.Signals): boolean;
-}
-
-/** Injectable process factory: `spawn("python3", [scriptPath])` by default. */
-export type SysideWorkerSpawner = (scriptPath: string) => SysideWorkerProcess;
+import { spawnSysideWorkerProcess, type SysideWorkerProcess, type SysideWorkerSpawner } from "./syside-worker-process.js";
+import { parseWorkerResponse, type WorkerResponse } from "./syside-worker-protocol.js";
 
 export interface SysideWorkerClientOptions {
   /** Absolute path of the fixed NDJSON worker script. */
@@ -53,10 +35,6 @@ interface WorkerRequest {
   timer: NodeJS.Timeout | undefined;
   onAbort: () => void;
 }
-
-type WorkerResponse =
-  | { id: number; ok: true; result: JsonValue }
-  | { id: number; ok: false; error: string };
 
 /**
  * Framing client for one persistent `python3 <fixed-worker-script>` process.
@@ -417,68 +395,9 @@ export class SysideWorkerClient {
   }
 }
 
-/** Real spawn wrapper for `python3 <fixed-worker-script>` with three pipes. */
-export function spawnSysideWorkerProcess(scriptPath: string): SysideWorkerProcess {
-  const child = spawn("python3", [scriptPath], { stdio: ["pipe", "pipe", "pipe"] });
-  return {
-    pid: child.pid,
-    stdin: child.stdin,
-    stdout: child.stdout,
-    stderr: child.stderr,
-    onExit: (listener) => child.on("exit", listener),
-    onError: (listener) => child.on("error", listener),
-    kill: (signal) => child.kill(signal),
-  };
-}
-
-function parseWorkerResponse(line: string): WorkerResponse {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(line);
-  } catch {
-    throw new Error("SysIDE Python worker returned malformed JSON");
-  }
-  if (!isRecord(parsed)) throw new Error("SysIDE Python worker response must be a JSON object");
-  const id = parsed["id"];
-  if (typeof id !== "number" || !Number.isInteger(id)) throw new Error("SysIDE Python worker response id must be an integer");
-  const ok = parsed["ok"];
-  if (ok === true) {
-    return { id, ok, result: requireJsonValue(parsed["result"], "SysIDE Python worker response result") };
-  }
-  if (ok === false) {
-    const error = parsed["error"];
-    if (typeof error !== "string") throw new Error("SysIDE Python worker error response must include an error string");
-    return { id, ok, error };
-  }
-  throw new Error("SysIDE Python worker response ok must be a boolean");
-}
-
-function requireJsonValue(value: unknown, label: string): JsonValue {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new Error(`${label} must contain only finite JSON numbers`);
-    return value;
-  }
-  if (Array.isArray(value)) {
-    const output: JsonValue[] = [];
-    for (const entry of value) output.push(requireJsonValue(entry, label));
-    return output;
-  }
-  if (isRecord(value)) {
-    const output: Record<string, JsonValue> = {};
-    for (const [key, child] of Object.entries(value)) output[key] = requireJsonValue(child, label);
-    return output;
-  }
-  throw new Error(`${label} must contain only JSON values`);
-}
-
 function abortError(signal: AbortSignal): Error {
   const reason: unknown = signal.reason;
   return reason instanceof Error ? reason : new Error("SysIDE Python worker operation aborted", { cause: reason });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function positiveInteger(value: number | undefined, fallback: number, key: string): number {

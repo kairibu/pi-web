@@ -12,7 +12,7 @@ import type {
 import { SYSIDE_ELEMENT_TYPES } from "./browser/syside-contract.js";
 import { elementTypeLabel } from "./browser/syside-elements-view.js";
 import plugin from "./browser/pi-web-plugin.js";
-import { SYSIDE_SEARCH_DEBOUNCE_MS } from "./browser/syside-panel.js";
+import { SYSIDE_SEARCH_DEBOUNCE_MS } from "./browser/syside-panel-controller.js";
 
 const projectId = "project-1";
 const workspaceId = "workspace-1";
