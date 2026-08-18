@@ -542,7 +542,7 @@ function renderElementList(html: HtmlTemplateTag, state: SysideWorkspaceUiState,
   if (state.listError !== undefined) return html`<p class="syside-error-message">${state.listError}</p>`;
   if (state.elements === undefined || state.elements.length === 0) return html`<p class="syside-muted">No elements.</p>`;
   const selectedKey = state.selectedQualifiedName === undefined ? undefined : qualifiedNameKey(state.selectedQualifiedName);
-  return state.elements.map((element) => {
+    return state.elements.map((element) => {
     const shortName = elementShortName(element);
     const isSelected = selectedKey === qualifiedNameKey(element.qualified_name);
     const rowClass = `${isSelected ? "syside-element-row is-selected" : "syside-element-row"}${shortName ? " has-short" : ""}`;
@@ -552,9 +552,9 @@ function renderElementList(html: HtmlTemplateTag, state: SysideWorkspaceUiState,
         class=${rowClass}
         @click=${() => { controller.selectElement(context, element.qualified_name); }}
       >
+        <span class="syside-element-type">${elementTypeLabel(element.type)}</span>
         ${shortName ? html`<span class="syside-element-short">&lt;${shortName}&gt;</span>` : null}
         <span class="syside-element-name">${element.declared_name}</span>
-        <span class="syside-element-type">${elementTypeLabel(element.type)}</span>
         <span class="syside-element-qn">${qualifiedNameDisplay(element.qualified_name)}</span>
       </button>
     `;
@@ -733,12 +733,12 @@ const sysidePanelStyles = `
   .syside-panel .syside-submenu-error { color: var(--pi-danger); }
   .syside-panel .syside-elements-body { flex: 1 1 auto; min-height: 0; display: grid; grid-template-rows: minmax(140px, 40%) minmax(0, 1fr); }
   .syside-panel .syside-elements-list { min-height: 0; overflow: auto; border-bottom: 1px solid var(--pi-border-muted); }
-  .syside-panel .syside-element-row { display: grid; grid-template-columns: 1fr 80px minmax(0, 1fr); gap: 8px; align-items: baseline; width: 100%; text-align: left; border: 0; border-radius: 0; background: transparent; margin: 0; padding: 5px 8px; }
-  .syside-panel .syside-element-row.has-short { grid-template-columns: auto 1fr 80px minmax(0, 1fr); }
+  .syside-panel .syside-element-row { display: grid; grid-template-columns: 80px 1fr minmax(0, 1fr); gap: 8px; align-items: baseline; width: 100%; text-align: left; border: 0; border-radius: 0; background: transparent; margin: 0; padding: 5px 8px; }
+  .syside-panel .syside-element-row.has-short { grid-template-columns: 80px auto 1fr minmax(0, 1fr); }
   .syside-panel .syside-element-row:hover, .syside-panel .syside-element-row.is-selected { background: var(--pi-selection-bg); }
   .syside-panel .syside-element-short { text-align: center; font-weight: 600; white-space: nowrap; padding-right: 6px; }
   .syside-panel .syside-element-name, .syside-panel .syside-element-qn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pi-muted); }
-  .syside-panel .syside-element-type { width: 80px; text-align: right; text-transform: uppercase; font-size: 11px; letter-spacing: .03em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; box-sizing: border-box; justify-self: end; color: var(--pi-muted); }
+  .syside-panel .syside-element-type { width: 80px; text-align: left; text-transform: uppercase; font-size: 11px; letter-spacing: .03em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; box-sizing: border-box; justify-self: start; color: var(--pi-muted); }
   .syside-panel .syside-element-qn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .syside-panel .syside-elements-details { min-height: 0; overflow: auto; padding: 8px 10px; }
   .syside-panel .syside-details-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 6px; }
