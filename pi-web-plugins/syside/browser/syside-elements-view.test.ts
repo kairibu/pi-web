@@ -55,19 +55,19 @@ describe("elementShortName", () => {
 
 describe("elementTypeLabel", () => {
   it("maps all six supported contract types to friendly labels", () => {
-    expect(elementTypeLabel("syside.PartUsage")).toBe("Part");
-    expect(elementTypeLabel("syside.PartDefinition")).toBe("Part definition");
-    expect(elementTypeLabel("syside.RequirementUsage")).toBe("Requirement");
-    expect(elementTypeLabel("syside.RequirementDefinition")).toBe("Requirement definition");
-    expect(elementTypeLabel("syside.ActionUsage")).toBe("Action");
-    expect(elementTypeLabel("syside.ActionDefinition")).toBe("Action definition");
+    expect(elementTypeLabel("syside.PartUsage")).toBe("part");
+    expect(elementTypeLabel("syside.PartDefinition")).toBe("part def");
+    expect(elementTypeLabel("syside.RequirementUsage")).toBe("req");
+    expect(elementTypeLabel("syside.RequirementDefinition")).toBe("req def");
+    expect(elementTypeLabel("syside.ActionUsage")).toBe("action");
+    expect(elementTypeLabel("syside.ActionDefinition")).toBe("action def");
   });
 
   it("pins every supported type to a label and falls back to the raw type", () => {
     for (const type of Object.keys(SYSIDE_ELEMENT_TYPE_LABELS)) {
       expect(SYSIDE_ELEMENT_TYPE_LABELS[type]).toBeTypeOf("string");
     }
-    expect(elementTypeLabel("syside.SomethingElse")).toBe("syside.SomethingElse");
+    expect(elementTypeLabel("syside.SomethingElse")).toBe("SomethingElse");
   });
 });
 

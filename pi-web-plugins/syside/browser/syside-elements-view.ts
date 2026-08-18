@@ -6,12 +6,13 @@ import type { SysideListElementsFilter } from "./syside-contract.js";
  * types fall back to their raw contract name rather than an invented label.
  */
 export const SYSIDE_ELEMENT_TYPE_LABELS: Record<string, string> = {
-  "syside.PartUsage": "Part",
-  "syside.PartDefinition": "Part definition",
-  "syside.RequirementUsage": "Requirement",
-  "syside.RequirementDefinition": "Requirement definition",
-  "syside.ActionUsage": "Action",
-  "syside.ActionDefinition": "Action definition",
+  "syside.PartUsage": "part",
+  "syside.PartDefinition": "part def",
+  "syside.RequirementUsage": "req",
+  "syside.RequirementDefinition": "req def",
+  "syside.ActionUsage": "action",
+  "syside.ActionDefinition": "action def",
+  "syside.InterfaceDefinition": "interface def",
 };
 
 /** Display form of a qualified name: segments joined with "::". */
@@ -43,9 +44,13 @@ export function elementShortName(element: { declared_short_name: string | null }
   return element.declared_short_name !== null && element.declared_short_name !== "" ? element.declared_short_name : "";
 }
 
+export function stripSysidePrefix(s: string): string {
+  return s.startsWith("syside.") ? s.slice("syside.".length) : s;
+}
+
 /** Label for a contract element type, with the raw type as fallback. */
 export function elementTypeLabel(type: string): string {
-  return SYSIDE_ELEMENT_TYPE_LABELS[type] ?? type;
+  return SYSIDE_ELEMENT_TYPE_LABELS[type] ?? stripSysidePrefix(type);
 }
 
 /**

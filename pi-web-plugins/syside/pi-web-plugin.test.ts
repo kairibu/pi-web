@@ -580,7 +580,7 @@ describe("bundled SysIDE browser plugin", () => {
     expect([...container.querySelectorAll(".syside-element-name")].map((node) => node.textContent)).toEqual(["Wing-AB"]);
     // With no short name declared the short column stays empty so it does not
     // duplicate the name column.
-    expect([...container.querySelectorAll(".syside-element-short")].map((node) => node.textContent)).toEqual([""]);
+    expect([...container.querySelectorAll(".syside-element-short")].map((node) => node.textContent)).toEqual([]);
     expect(request).toHaveBeenLastCalledWith("list-elements", { search: "AB" });
     render(null, container);
   });
