@@ -9,6 +9,8 @@ import type {
   WorkspaceBackend,
   WorkspacePanelContext,
 } from "@jmfederico/pi-web/plugin-api";
+import { SYSIDE_ELEMENT_TYPES } from "./browser/syside-contract.js";
+import { elementTypeLabel } from "./browser/syside-elements-view.js";
 import plugin from "./browser/pi-web-plugin.js";
 import { SYSIDE_SEARCH_DEBOUNCE_MS } from "./browser/syside-panel.js";
 
@@ -143,7 +145,8 @@ describe("bundled SysIDE browser plugin", () => {
     expect(container.querySelector(".syside-error[role='alert']")?.textContent).toContain("syside check failed");
     // A failed auto-check must not retry on its own (the activity element only
     // connects once); the next render re-commits properties without re-connecting.
-    expect(backend.request).toHaveBeenCalledTimes(1);
+    // The connect also loads the model overview survey, hence two calls.
+    expect(backend.request).toHaveBeenCalledTimes(2);
 
     backend.state.failures = 0;
     backend.state.errors = ["New error"];
@@ -151,7 +154,7 @@ describe("bundled SysIDE browser plugin", () => {
     await settleBackend();
     render(panel.render(context), container);
 
-    expect(backend.request).toHaveBeenCalledTimes(2);
+    expect(backend.request).toHaveBeenCalledTimes(3);
     expect(container.querySelector(".syside-error[role='alert']")).toBeNull();
     expect([...container.querySelectorAll(".syside-error-message")].map((node) => node.textContent)).toEqual(["New error"]);
     render(null, container);
@@ -184,13 +187,14 @@ describe("bundled SysIDE browser plugin", () => {
 
     expect(container.querySelector(".syside-error[role='alert']")?.textContent).toContain("syside check failed");
     // Only the initial auto-check; the failure-triggered re-renders must not
-    // start any further checks.
-    expect(backend.request).toHaveBeenCalledTimes(1);
+    // start any further checks. The connect also loads the model overview
+    // survey, hence two calls.
+    expect(backend.request).toHaveBeenCalledTimes(2);
 
     // The toolbar still drives an explicit re-check.
     button(container, "Check").click();
     await settleBackend();
-    expect(backend.request).toHaveBeenCalledTimes(2);
+    expect(backend.request).toHaveBeenCalledTimes(3);
     render(null, container);
   });
 
@@ -208,13 +212,14 @@ describe("bundled SysIDE browser plugin", () => {
     render(panel.render(localContext), container);
     await settleBackend();
     // Machine-scoped keys keep each machine's cached outcome, so reconnecting
-    // with a result already present does not re-run the check.
+    // with a result already present does not re-run the check (only the fresh
+    // connect loads the model overview survey, hence two calls).
     expect([...container.querySelectorAll(".syside-error-message")].map((node) => node.textContent)).toEqual(["local error"]);
-    expect(localBackend.request).toHaveBeenCalledTimes(1);
+    expect(localBackend.request).toHaveBeenCalledTimes(2);
     render(panel.render(remoteContext), container);
     await settleBackend();
     expect([...container.querySelectorAll(".syside-error-message")].map((node) => node.textContent)).toEqual(["remote error"]);
-    expect(remoteBackend.request).toHaveBeenCalledTimes(1);
+    expect(remoteBackend.request).toHaveBeenCalledTimes(2);
     render(null, container);
 
     // Evict: traverse well beyond the intentionally small workspace-state cache.
@@ -224,15 +229,15 @@ describe("bundled SysIDE browser plugin", () => {
     }
 
     // The oldest local state was evicted, so reconnecting re-runs the check
-    // instead of restoring the cached result.
+    // and reloads the overview survey instead of restoring the cached result.
     render(panel.render(localContext), container);
     await settleBackend();
     await settleBackend();
-    expect(localBackend.request).toHaveBeenCalledTimes(2);
+    expect(localBackend.request).toHaveBeenCalledTimes(4);
     render(null, container);
   });
 
-  it("opens the element view from the toolbar and closes back to the check content", async () => {
+  it("opens the element view from the toolbar and returns to the overview/check content", async () => {
     const backend = backendFixture();
     const panel = requiredPanel(activate("syside"));
     const context = panelContext(backend.request);
@@ -256,13 +261,116 @@ describe("bundled SysIDE browser plugin", () => {
     expect(submenu.querySelector("select[aria-label='Owning package']")).not.toBeNull();
     expect(submenu.querySelector("input[type='search']")).not.toBeNull();
 
-    // The toolbar toggle closes the element view; the cached check content
+    // Overview returns to the overview/check split; the cached check result
     // is restored unchanged (it is only hidden, never cleared).
-    button(container, "Elements").click();
+    button(container, "Overview").click();
     await settleBackend();
     render(panel.render(context), container);
     expect(container.querySelector(".syside-panel .syside-split .syside-elements-submenu")).toBeNull();
     expect([...container.querySelectorAll(".syside-error-message")].map((node) => node.textContent)).toEqual(["Unknown reference 'Wing'"]);
+    render(null, container);
+  });
+
+  it("renders the model overview with per-package element counts on initial connect", async () => {
+    const backend = backendFixture({ errors: [], survey: [packageFixture("m", ["m"]), packageFixture("Cabin", ["m", "Cabin"])] });
+    const panel = requiredPanel(activate("syside"));
+    const context = panelContext(backend.request);
+    const container = document.createElement("div");
+    document.body.append(container);
+    render(panel.render(context), container);
+    await settleBackend();
+    render(panel.render(context), container);
+
+    const packages = [...container.querySelectorAll(".syside-panel .syside-package")];
+    expect(packages).toHaveLength(2);
+    expect(packages[0]?.querySelector(".syside-package-header strong")?.textContent).toBe("m");
+    expect(packages[1]?.querySelector(".syside-package-header strong")?.textContent).toBe("Cabin");
+    // Every supported element type renders one count row per package, zero
+    // counts included: the render is driven by SYSIDE_ELEMENT_TYPES.map and
+    // the contract parser guarantees every count key is present.
+    for (const card of packages) {
+      expect(card.querySelectorAll(".syside-count-type")).toHaveLength(SYSIDE_ELEMENT_TYPES.length);
+      expect(card.querySelectorAll(".syside-count-value")).toHaveLength(SYSIDE_ELEMENT_TYPES.length);
+    }
+    // The fixture gives the first package exactly one part usage and nothing
+    // else; the explicit "0" rows pin the include-zeros criterion.
+    expect([...(packages[0]?.querySelectorAll(".syside-count-value") ?? [])].map((node) => node.textContent)).toEqual(["1", "0", "0", "0", "0", "0"]);
+    expect([...(packages[0]?.querySelectorAll(".syside-count-type") ?? [])].map((node) => node.textContent)).toEqual(SYSIDE_ELEMENT_TYPES.map((type) => elementTypeLabel(type)));
+    expect(button(container, "Overview").getAttribute("aria-pressed")).toBe("true");
+    expect(button(container, "Check").getAttribute("aria-pressed")).toBe("false");
+    expect(button(container, "Elements").getAttribute("aria-pressed")).toBe("false");
+    render(null, container);
+  });
+
+  it("shows the overview loading state until the survey resolves", async () => {
+    let resolveSurvey: ((value: JsonValue) => void) | undefined;
+    const surveyPromise = new Promise<JsonValue>((resolve) => { resolveSurvey = resolve; });
+    const request = vi.fn((operation: string): Promise<JsonValue> => {
+      if (operation === "check") return Promise.resolve({ errors: [] });
+      if (operation === "survey") return surveyPromise;
+      return Promise.reject(new Error(`Unexpected operation: ${operation}`));
+    });
+    const panel = requiredPanel(activate("syside"));
+    const context = panelContext(request);
+    const container = document.createElement("div");
+    document.body.append(container);
+    render(panel.render(context), container);
+    await settleBackend();
+    render(panel.render(context), container);
+    expect(container.querySelector(".syside-muted")?.textContent).toContain("Loading overview");
+
+    resolveSurvey?.({ projectPath: "/model", packages: [packageFixture("Cabin", ["m", "Cabin"])] });
+    await settleBackend();
+    render(panel.render(context), container);
+    expect(container.querySelector(".syside-package")).not.toBeNull();
+    render(null, container);
+  });
+
+  it("falls back to the check result when the survey fails", async () => {
+    const backend = backendFixture({ errors: ["Unknown reference 'Wing'"], surveyFailures: 1 });
+    const panel = requiredPanel(activate("syside"));
+    const context = panelContext(backend.request);
+    const container = document.createElement("div");
+    document.body.append(container);
+    render(panel.render(context), container);
+    await settleBackend();
+    render(panel.render(context), container);
+
+    expect([...container.querySelectorAll(".syside-error-message")].map((node) => node.textContent)).toEqual(["Unknown reference 'Wing'"]);
+    expect(container.querySelector(".syside-package")).toBeNull();
+    expect(container.querySelector(".syside-overview")).toBeNull();
+    render(null, container);
+  });
+
+  it("returns to the overview from the element view", async () => {
+    const backend = backendFixture({ errors: [], survey: [packageFixture("Cabin", ["m", "Cabin"])] });
+    const panel = requiredPanel(activate("syside"));
+    const container = document.createElement("div");
+    const context = await mountAndOpenElements(panel, backend, container);
+    button(container, "Overview").click();
+    await settleBackend();
+    render(panel.render(context), container);
+    expect(container.querySelector(".syside-elements-submenu")).toBeNull();
+    expect(container.querySelector(".syside-package")?.textContent).toContain("Cabin");
+    render(null, container);
+  });
+
+  it("re-runs the check from the toolbar even when the overview has packages", async () => {
+    const backend = backendFixture({ errors: ["Unknown reference 'Wing'"], survey: [packageFixture("Cabin", ["m", "Cabin"])] });
+    const panel = requiredPanel(activate("syside"));
+    const context = panelContext(backend.request);
+    const container = document.createElement("div");
+    document.body.append(container);
+    render(panel.render(context), container);
+    await settleBackend();
+    render(panel.render(context), container);
+    expect(container.querySelector(".syside-package")).not.toBeNull();
+
+    button(container, "Check").click();
+    await settleBackend();
+    render(panel.render(context), container);
+    expect([...container.querySelectorAll(".syside-error-message")].map((node) => node.textContent)).toEqual(["Unknown reference 'Wing'"]);
+    expect(button(container, "Check").getAttribute("aria-pressed")).toBe("true");
     render(null, container);
   });
 
@@ -283,7 +391,7 @@ describe("bundled SysIDE browser plugin", () => {
   });
 
   it("offers a packages-unavailable option when the survey request fails", async () => {
-    const backend = backendFixture({ errors: [], surveyFailures: 1 });
+    const backend = backendFixture({ errors: [], surveyFailures: 2 });
     const panel = requiredPanel(activate("syside"));
     const container = document.createElement("div");
     await mountAndOpenElements(panel, backend, container);
@@ -360,6 +468,30 @@ describe("bundled SysIDE browser plugin", () => {
     await vi.advanceTimersByTimeAsync(2);
     expect(listCalls()).toBe(before + 1);
     expect(backend.request).toHaveBeenLastCalledWith("list-elements", { search: "Wing" });
+    render(null, container);
+  });
+
+  it("cancels a pending search debounce when leaving the element view", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const backend = backendFixture({ errors: [], survey: [packageFixture("Cabin", ["m", "Cabin"])] });
+    const panel = requiredPanel(activate("syside"));
+    const container = document.createElement("div");
+    await mountAndOpenElements(panel, backend, container);
+
+    const input = container.querySelector<HTMLInputElement>("input[type='search']");
+    if (input === null) throw new Error("Expected a search input");
+    input.value = "Wing";
+    input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+
+    // Leave the element view before the trailing edge. setView clears the
+    // pending debounce so no stale list request can fire for a hidden view
+    // (the timer callback has the same guard, so this pins the behavior
+    // contract: leaving with a pending search issues nothing extra).
+    button(container, "Overview").click();
+    await vi.advanceTimersByTimeAsync(SYSIDE_SEARCH_DEBOUNCE_MS + 1);
+
+    // Only the open's initial unfiltered list request was ever issued.
+    expect(backend.request.mock.calls.filter(([operation]) => operation === "list-elements")).toHaveLength(1);
     render(null, container);
   });
 
@@ -696,8 +828,9 @@ async function mountAndOpenElements(
   backend: ReturnType<typeof backendFixture>,
   container: HTMLElement,
 ): Promise<WorkspacePanelContext> {
-  // Connect (auto-check) + render the initial check result, then open the
-  // element view through the toolbar button and render the settled element view.
+  // Connect (auto-check + overview survey load) + render the initial
+  // check/overview result, then open the element view through the toolbar
+  // button and render the settled element view.
   const context = panelContext(backend.request);
   document.body.append(container);
   render(panel.render(context), container);

@@ -316,7 +316,7 @@ Git is enabled by default. An enabled primary third-party provider can claim a p
 ### SysIDE
 
 **Plugin id:** `syside`
-**What it does:** attaches a non-owning project capability to every workspace whose path contains `*.sysml` files and adds a **SysIDE** workspace panel that shows the error messages reported by the persistent SysIDE model worker over those files.
+**What it does:** attaches a non-owning project capability to every workspace whose path contains `*.sysml` files and adds a **SysIDE** workspace panel that opens on an overview of the loaded model (packages and their per-type element counts), falling back to the check error messages reported by the persistent model worker when no model is loaded or the survey fails.
 
 SysIDE is enabled by default.
 
@@ -324,7 +324,7 @@ SysIDE is not a workspace provider: it never claims a project and never particip
 
 SysIDE requires Python 3 with the `syside` package installed on the machine running the session daemon; without it, capability requests fail with a clear error. Because the plugin is owned by the session daemon, server-plugin updates require a manual restart of the session daemon (`systemctl --user restart pi-web-sessiond`) followed by a browser reload.
 
-The browser panel re-runs the check when its toolbar **Check** button is clicked and initially when the panel connects; it never polls and does not read the URL location. Backend or transport failures render in a top-level alert. The **Go to SysIDE** and **Refresh SysIDE** actions open the panel and re-run its check for the selected workspace. Disabling `syside` and restarting sessiond removes the capability and leaves the kernel project-folder workspace; reload the browser afterward so SysIDE contributions disappear.
+The browser panel opens on the model overview, with **Overview**, **Check**, and **Elements** toolbar buttons selecting the corresponding view (the **Check** button also re-runs the check, which additionally runs on connection); it never polls and does not read the URL location. Backend or transport failures render in a top-level alert. The **Go to SysIDE** and **Refresh SysIDE** actions open the panel and re-run its check for the selected workspace. Disabling `syside` and restarting sessiond removes the capability and leaves the kernel project-folder workspace; reload the browser afterward so SysIDE contributions disappear.
 
 ### Updates
 

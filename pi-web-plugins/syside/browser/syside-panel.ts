@@ -44,6 +44,9 @@ const SYSIDE_WORKSPACE_STATE_LIMIT = 8;
 export const SYSIDE_SEARCH_DEBOUNCE_MS = 250;
 const activityElementTag = "pi-web-syside-panel-activity";
 
+/** Panel views selectable from the toolbar. */
+type SysidePanelView = "overview" | "check" | "elements";
+
 interface SysideWorkspaceUiState {
   context: WorkspacePanelContext;
   retained: boolean;
@@ -52,11 +55,12 @@ interface SysideWorkspaceUiState {
   error: string | undefined;
   checkRequest: Promise<void> | undefined;
 
-  // Element view state. Kept per workspace like the check result, so leaving
-  // and re-entering the panel restores the open view's filters, selection and
-  // view mode. The element list is re-queried on every open; only the survey
-  // is deduped (loaded once per workspace).
-  elementViewActive: boolean;
+  // Active panel view. "overview" is the default: it shows the model overview
+  // when the survey has packages and falls back to the check result otherwise.
+  // Kept per workspace so re-entering the panel restores the last view. The
+  // element list is re-queried on every entry into the element view; only the
+  // survey is deduped (loaded once per workspace).
+  view: SysidePanelView;
   survey: SysideSurveyResponse | undefined;
   surveyLoading: boolean;
   surveyError: string | undefined;
@@ -121,6 +125,11 @@ class SysideUiController {
     // change-guards (see defineSysidePanelActivityElement) a re-render would
     // re-enter connect() and re-run the failing check forever.
     if (state.errors === undefined && state.checkRequest === undefined) void this.check(context);
+    // Load the overview data once per workspace under the same exactly-once
+    // guarantee: connect() runs only when the activity element actually
+    // (re)connects, never from the render path, so a failed survey behaves
+    // like a failed check. Do not trigger the survey from the render path.
+    if (state.survey === undefined && state.surveyRequest === undefined) void this.loadSurvey(context);
   }
 
   disconnect(context: WorkspacePanelContext): void {
@@ -160,32 +169,28 @@ class SysideUiController {
   }
 
   /**
-   * Element view entry point. Like the check/error rendering this is only
-   * triggered from user interaction (the toolbar button), never from the
+   * Selects the panel view. Like the check/error rendering, switching is only
+   * triggered from user interaction (the toolbar buttons), never from the
    * activity element connect() or the render path, so a failing backend can
    * never re-enter here as an infinite retry loop.
    */
-  openElementView(context: WorkspacePanelContext): void {
+  setView(context: WorkspacePanelContext, view: SysidePanelView): void {
     const state = this.stateFor(context);
-    state.elementViewActive = true;
-    // Survey once per workspace; dedupe with the in-flight request so rapid
-    // open/close churn does not re-survey.
-    if (state.survey === undefined && state.surveyRequest === undefined) void this.loadSurvey(context);
-    this.refreshList(context);
-    this.requestRender(state);
-  }
-
-  closeElementView(context: WorkspacePanelContext): void {
-    const state = this.stateFor(context);
-    // Drop any pending search debounce: a request issued after the view closed
-    // would render into nothing and only surface a stale error later.
-    if (state.searchTimer !== undefined) {
+    if (state.view === view) return;
+    // Leaving the element view: drop any pending search debounce so a delayed
+    // request cannot render into a view that is no longer visible.
+    if (state.view === "elements" && state.searchTimer !== undefined) {
       clearTimeout(state.searchTimer);
       state.searchTimer = undefined;
     }
-    state.elementViewActive = false;
-    // Check result state is untouched, so the split reverts to the last
-    // check/error rendering unchanged.
+    state.view = view;
+    // Entering the element view re-queries the list. The survey is reused from
+    // the overview's initial load when already cached; a previously failed
+    // survey is retried here (same behavior as the old openElementView).
+    if (view === "elements") {
+      if (state.survey === undefined && state.surveyRequest === undefined) void this.loadSurvey(context);
+      this.refreshList(context);
+    }
     this.requestRender(state);
   }
 
@@ -279,7 +284,7 @@ class SysideUiController {
     if (state.searchTimer !== undefined) clearTimeout(state.searchTimer);
     state.searchTimer = setTimeout(() => {
       state.searchTimer = undefined;
-      if (!state.retained || !state.elementViewActive) return;
+      if (!state.retained || state.view !== "elements") return;
       this.refreshList(context);
     }, SYSIDE_SEARCH_DEBOUNCE_MS);
   }
@@ -350,7 +355,7 @@ class SysideUiController {
       loading: false,
       error: undefined,
       checkRequest: undefined,
-      elementViewActive: false,
+      view: "overview",
       survey: undefined,
       surveyLoading: false,
       surveyError: undefined,
@@ -449,11 +454,9 @@ function renderSysidePanel(html: HtmlTemplateTag, controller: SysideUiController
       <section class="syside-toolbar">
         <strong>SysIDE</strong>
         <div class="syside-toolbar-actions">
-          <button type="button" ?disabled=${state.loading} @click=${() => { void controller.check(context); }}>Check</button>
-          <button type="button" aria-pressed=${String(state.elementViewActive)} @click=${() => {
-            if (state.elementViewActive) controller.closeElementView(context);
-            else controller.openElementView(context);
-          }}>Elements</button>
+          <button type="button" aria-pressed=${String(state.view === "overview")} @click=${() => { controller.setView(context, "overview"); }}>Overview</button>
+          <button type="button" aria-pressed=${String(state.view === "check")} ?disabled=${state.loading} @click=${() => { controller.setView(context, "check"); void controller.check(context); }}>Check</button>
+          <button type="button" aria-pressed=${String(state.view === "elements")} @click=${() => { controller.setView(context, "elements"); }}>Elements</button>
         </div>
       </section>
       ${state.error === undefined ? null : html`<div class="syside-error" role="alert">${state.error}</div>`}
@@ -465,9 +468,17 @@ function renderSysidePanel(html: HtmlTemplateTag, controller: SysideUiController
 }
 
 function renderSysideSplit(html: HtmlTemplateTag, state: SysideWorkspaceUiState, controller: SysideUiController, context: WorkspacePanelContext) {
-  // The element view wins over the check-result split content; closing it
-  // restores the check/error messages unchanged (they are only hidden).
-  if (state.elementViewActive) return renderElementView(html, state, controller, context);
+  if (state.view === "elements") return renderElementView(html, state, controller, context);
+  if (state.view === "check") return renderCheckResult(html, state);
+  return renderOverview(html, state);
+}
+
+/**
+ * The check-result split content: error messages, or the muted idle/loading
+ * hint. Error <p>s stay direct children of the split so the fallback keeps
+ * the same DOM shape as the original check rendering.
+ */
+function renderCheckResult(html: HtmlTemplateTag, state: SysideWorkspaceUiState) {
   if (state.errors !== undefined) {
     // Only error messages, each a direct child of the split; an empty error
     // list renders an empty split.
@@ -475,6 +486,50 @@ function renderSysideSplit(html: HtmlTemplateTag, state: SysideWorkspaceUiState,
   }
   if (state.error !== undefined) return null;
   return html`<p class="syside-muted">${state.loading ? "Running SysIDE check…" : "Run SysIDE check."}</p>`;
+}
+
+/**
+ * The default overview view: the loaded model's packages and per-type element
+ * counts once the survey has packages, otherwise the check-result fallback
+ * (survey still loading, survey failed, or no packages to summarize).
+ */
+function renderOverview(html: HtmlTemplateTag, state: SysideWorkspaceUiState) {
+  if (state.surveyError !== undefined) return renderCheckResult(html, state);
+  if (state.survey === undefined) {
+    if (state.surveyLoading) return html`<p class="syside-muted">Loading overview…</p>`;
+    return renderCheckResult(html, state);
+  }
+  if (state.survey.packages.length === 0) return renderCheckResult(html, state);
+  return renderOverviewContent(html, state);
+}
+
+/** One package card per surveyed package, with one count row per supported element type. */
+function renderOverviewContent(html: HtmlTemplateTag, state: SysideWorkspaceUiState) {
+  // Unreachable through renderOverview (the survey is checked before the
+  // call): kept only so TypeScript narrows state.survey to non-undefined here.
+  const survey = state.survey;
+  if (survey === undefined) return null;
+  return html`
+    <section class="syside-overview">
+      <p class="syside-overview-project syside-muted">${survey.projectPath}</p>
+      ${survey.packages.map((pkg) => html`
+        <section class="syside-package">
+          <header class="syside-package-header">
+            <strong>${pkg.declared_name !== "" ? pkg.declared_name : qualifiedNameDisplay(pkg.qualified_name)}</strong>
+            ${pkg.qualified_name.length === 0 ? null : html`<span class="syside-package-qn syside-muted">${qualifiedNameDisplay(pkg.qualified_name)}</span>`}
+          </header>
+          <ul class="syside-package-counts">
+            ${SYSIDE_ELEMENT_TYPES.map((type) => html`
+              <li>
+                <span class="syside-count-type">${elementTypeLabel(type)}</span>
+                <span class="syside-count-value">${String(pkg.element_counts[type])}</span>
+              </li>
+            `)}
+          </ul>
+        </section>
+      `)}
+    </section>
+  `;
 }
 
 function renderElementView(html: HtmlTemplateTag, state: SysideWorkspaceUiState, controller: SysideUiController, context: WorkspacePanelContext) {
@@ -755,4 +810,13 @@ const sysidePanelStyles = `
   .syside-panel .syside-details-section li { margin: 2px 0; }
   .syside-panel .syside-link { background: none; border: 0; color: var(--pi-accent); padding: 0; text-decoration: underline; cursor: pointer; }
   .syside-panel .syside-diagram-placeholder { margin: 10px 0; padding: 24px 12px; border: 1px dashed var(--pi-border); border-radius: 7px; color: var(--pi-muted); text-align: center; }
+  .syside-panel .syside-overview { padding: 4px 10px; }
+  .syside-panel .syside-overview-project { margin: 4px 0; font-size: 12px; }
+  .syside-panel .syside-package { margin: 10px 0; }
+  .syside-panel .syside-package-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+  .syside-panel .syside-package-qn { font-size: 12px; }
+  .syside-panel .syside-package-counts { list-style: none; margin: 4px 0 0; padding: 0 0 0 12px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 16px; }
+  .syside-panel .syside-package-counts li { display: flex; justify-content: space-between; gap: 8px; }
+  .syside-panel .syside-count-type { color: var(--pi-muted); }
+  .syside-panel .syside-count-value { font-weight: 600; }
 `;
