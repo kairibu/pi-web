@@ -32,9 +32,10 @@ export const sysidePanelStyles = `
   .syside-panel .syside-element-type { width: 80px; text-align: left; text-transform: uppercase; font-size: 11px; letter-spacing: .03em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; box-sizing: border-box; justify-self: start; color: var(--pi-muted); }
   .syside-panel .syside-element-qn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .syside-panel .syside-elements-details { min-height: 0; overflow: auto; padding: 8px 10px; }
-  .syside-panel .syside-details-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 6px; }
-  .syside-panel .syside-details-filepath { color: var(--pi-muted); }
-  .syside-panel .syside-view-toggle { display: inline-flex; margin: 4px 0 10px; }
+  .syside-panel .syside-details-header { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-bottom: 12px; padding-bottom: 4px; }
+  .syside-panel .syside-details-header .syside-muted { margin-left: auto; align-self: center; }
+  .syside-panel .syside-details-filepath { color: var(--pi-muted); display: block; width: 100%; margin-top: 2px; }
+  .syside-panel .syside-view-toggle { display: flex; justify-content: flex-end; width: 100%; margin: 6px 0 12px; }
   .syside-panel .syside-view-button { border-radius: 0; }
   .syside-panel .syside-view-button:first-child { border-top-left-radius: 7px; border-bottom-left-radius: 7px; }
   .syside-panel .syside-view-button:last-child { border-top-right-radius: 7px; border-bottom-right-radius: 7px; }
