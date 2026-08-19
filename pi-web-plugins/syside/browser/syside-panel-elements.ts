@@ -15,6 +15,7 @@ import type { SysideUiController } from "./syside-panel-controller.js";
 import type { SysideWorkspaceUiState } from "./syside-panel-state.js";
 
 export function renderElementView(html: HtmlTemplateTag, state: SysideWorkspaceUiState, controller: SysideUiController, context: WorkspacePanelContext) {
+  defineSysideSelectSyncElement();
   return html`
     <section class="syside-elements">
       ${renderElementsSubmenu(html, state, controller, context)}
@@ -70,6 +71,15 @@ function renderElementsSubmenu(html: HtmlTemplateTag, state: SysideWorkspaceUiSt
         }}
       >
       ${state.surveyError === undefined ? null : html`<span class="syside-submenu-error" role="alert">${state.surveyError}</span>`}
+      <!-- Imperatively syncs the filter <select> values below after their
+           <option> children commit. Lit binds a <select>'s .value before its
+           options exist on the first submenu render (and again when the survey
+           resolves later), so a pre-set package/type filter would otherwise be
+           dropped. Plugins cannot import lit/directives/ref.js to do this from
+           a directive (plugin modules load with no import map, so only
+           relative imports resolve), so a scoped custom element owns the
+           post-commit fixup instead. -->
+      <pi-web-syside-select-sync .state=${state}></pi-web-syside-select-sync>
     </div>
   `;
 }
@@ -200,4 +210,52 @@ function packageNameFromSelectValue(value: string): string[] | undefined {
     // Only reachable for values the panel itself did not generate.
     return undefined;
   }
+}
+
+const selectSyncElementTag = "pi-web-syside-select-sync";
+
+/**
+ * Hidden element rendered at the end of the elements submenu. It owns the
+ * imperative post-commit sync of the filter <select> values (see the comment
+ * at its render site for why this cannot be a declarative .value/?selected
+ * binding or a lit/directives/ref.js directive). Safe to call repeatedly: it
+ * registers only once.
+ */
+export function defineSysideSelectSyncElement(): void {
+  if (typeof customElements === "undefined" || typeof HTMLElement === "undefined") return;
+  if (customElements.get(selectSyncElementTag) !== undefined) return;
+  class SysideSelectSyncElement extends HTMLElement {
+    private stateValue: SysideWorkspaceUiState | undefined;
+    private syncScheduled = false;
+
+    // lit-html 3.x re-commits object property parts on every render, so this
+    // setter fires even when the state reference is unchanged — that is what
+    // makes the sync re-run when a late-resolving survey finally populates the
+    // package options after the first render.
+    set state(value: SysideWorkspaceUiState | undefined) {
+      this.stateValue = value;
+      this.scheduleSync();
+    }
+
+    connectedCallback(): void {
+      this.scheduleSync();
+    }
+
+    private scheduleSync(): void {
+      if (this.syncScheduled) return;
+      this.syncScheduled = true;
+      queueMicrotask(() => {
+        this.syncScheduled = false;
+        const state = this.stateValue;
+        if (!this.isConnected || state === undefined) return;
+        const submenu = this.closest(".syside-elements-submenu");
+        if (submenu === null) return;
+        const typeSelect = submenu.querySelector<HTMLSelectElement>("select[aria-label='Element type']");
+        if (typeSelect !== null) typeSelect.value = state.typeFilter ?? "";
+        const packageSelect = submenu.querySelector<HTMLSelectElement>("select[aria-label='Owning package']");
+        if (packageSelect !== null) packageSelect.value = packageFilterSelectValue(state);
+      });
+    }
+  }
+  customElements.define(selectSyncElementTag, SysideSelectSyncElement);
 }

@@ -1,6 +1,7 @@
-import type { HtmlTemplateTag } from "@jmfederico/pi-web/plugin-api";
+import type { HtmlTemplateTag, WorkspacePanelContext } from "@jmfederico/pi-web/plugin-api";
 import { SYSIDE_ELEMENT_TYPES } from "./syside-contract.js";
 import { elementTypeLabel, qualifiedNameDisplay } from "./syside-elements-view.js";
+import type { SysideUiController } from "./syside-panel-controller.js";
 import type { SysideWorkspaceUiState } from "./syside-panel-state.js";
 
 /**
@@ -23,18 +24,28 @@ export function renderCheckResult(html: HtmlTemplateTag, state: SysideWorkspaceU
  * counts once the survey has packages, otherwise the check-result fallback
  * (survey still loading, survey failed, or no packages to summarize).
  */
-export function renderOverview(html: HtmlTemplateTag, state: SysideWorkspaceUiState) {
+export function renderOverview(
+  html: HtmlTemplateTag,
+  state: SysideWorkspaceUiState,
+  controller: SysideUiController,
+  context: WorkspacePanelContext,
+) {
   if (state.surveyError !== undefined) return renderCheckResult(html, state);
   if (state.survey === undefined) {
     if (state.surveyLoading) return html`<p class="syside-muted">Loading overview…</p>`;
     return renderCheckResult(html, state);
   }
   if (state.survey.packages.length === 0) return renderCheckResult(html, state);
-  return renderOverviewContent(html, state);
+  return renderOverviewContent(html, state, controller, context);
 }
 
-/** Compact package summary list: package name plus the non-zero element counts. */
-function renderOverviewContent(html: HtmlTemplateTag, state: SysideWorkspaceUiState) {
+/** Compact package summary list: package link plus the non-zero element-count links. */
+function renderOverviewContent(
+  html: HtmlTemplateTag,
+  state: SysideWorkspaceUiState,
+  controller: SysideUiController,
+  context: WorkspacePanelContext,
+) {
   // Unreachable through renderOverview (the survey is checked before the
   // call): kept only so TypeScript narrows state.survey to non-undefined here.
   const survey = state.survey;
@@ -46,25 +57,38 @@ function renderOverviewContent(html: HtmlTemplateTag, state: SysideWorkspaceUiSt
       </header>
       <p class="syside-overview-project syside-muted">${survey.projectPath}</p>
       <ul class="syside-package-list">
-        ${survey.packages.map((pkg) => html`
-          <li class="syside-package-item">
-            <span class="syside-package-name">${pkg.declared_name !== "" ? pkg.declared_name : qualifiedNameDisplay(pkg.qualified_name)}</span>
-            <span class="syside-package-summary">${summarizePackageCounts(pkg)}</span>
-          </li>
-        `)}
+        ${survey.packages.map((pkg) => {
+          const entries = packageCountEntries(pkg);
+          return html`
+            <li class="syside-package-item">
+              <button
+                type="button"
+                class="syside-link syside-package-link"
+                title=${qualifiedNameDisplay(pkg.qualified_name)}
+                @click=${() => { controller.openPackage(context, pkg.qualified_name); }}
+              >${pkg.declared_name !== "" ? pkg.declared_name : qualifiedNameDisplay(pkg.qualified_name)}</button>
+              <span class="syside-package-summary">${entries.length === 0
+                ? "no counted elements"
+                : entries.map((entry, index) => html`${index > 0 ? ", " : null}<button
+                    type="button"
+                    class="syside-link syside-type-count-link"
+                    @click=${() => { controller.openPackage(context, pkg.qualified_name, entry.type); }}
+                  >${compactElementTypeLabel(entry.type)}: ${entry.count}</button>`)}</span>
+            </li>
+          `;
+        })}
       </ul>
     </section>
   `;
 }
 
-function summarizePackageCounts(pkg: { element_counts: Record<string, number> }): string {
-  const counts = SYSIDE_ELEMENT_TYPES.map((type) => {
+/** Non-zero per-type element counts of a surveyed package, in the canonical type order. */
+function packageCountEntries(pkg: { element_counts: Record<string, number> }): { type: string; count: number }[] {
+  return SYSIDE_ELEMENT_TYPES.flatMap((type) => {
     const count = pkg.element_counts[type];
-    if (count === undefined || count <= 0) return null;
-    return `${compactElementTypeLabel(type)}: ${count.toString()}`;
-  }).filter((entry): entry is string => entry !== null);
-
-  return counts.length === 0 ? "no counted elements" : counts.join(", ");
+    if (count === undefined || count <= 0) return [];
+    return [{ type, count }];
+  });
 }
 
 function compactElementTypeLabel(type: string): string {

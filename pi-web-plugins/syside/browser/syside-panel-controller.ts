@@ -199,6 +199,34 @@ export class SysideUiController {
   }
 
   /**
+   * Opens the elements view filtered to a package — and optionally a type —
+   * from the overview's package/count links. This is deliberately a single
+   * method instead of composing setPackageFilter/setTypeFilter + setView:
+   * each of those refreshes the list on its own, so composing them from the
+   * overview view would issue multiple list-elements requests (the first
+   * while still on the overview). The one refresh after the view and filters
+   * change issues exactly the single request the new view needs.
+   *
+   * The `type` parameter doubles as the reset: a plain package-name click
+   * passes `undefined` and therefore clears any stale type filter ("show all
+   * elements of this package"), while a type-count click passes its type.
+   * This deliberately differs from the "Owning package" <select>, which only
+   * changes one filter dimension; the click intent is a fresh scoped list.
+   * searchText is preserved (not cleared) to stay consistent with the
+   * existing filter <select>/search semantics, so a previous elements-view
+   * search still applies to the newly filtered list.
+   */
+  openPackage(context: WorkspacePanelContext, qualifiedName: string[], type?: string): void {
+    const state = this.store.stateFor(context);
+    state.packageFilter = qualifiedName;
+    state.typeFilter = type;
+    state.view = "elements";
+    if (state.survey === undefined && state.surveyRequest === undefined) void this.loadSurvey(context);
+    this.refreshList(context);
+    this.requestRender(state);
+  }
+
+  /**
    * Applies the search term to state immediately (so the input keeps its live
    * text) but debounces the query: a keystroke burst issues one trailing list
    * request after ~250 ms instead of queuing one model query per key. The

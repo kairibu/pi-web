@@ -51,6 +51,5 @@ export const sysidePanelStyles = `
   .syside-panel .syside-package-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
   .syside-panel .syside-package-list { list-style: none; margin: 8px 0 0; padding: 0 0 0 12px; }
   .syside-panel .syside-package-item { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; margin: 6px 0; line-height: 1.5; color: var(--pi-muted); }
-  .syside-panel .syside-package-name { color: var(--pi-text); font: inherit; font-weight: normal; }
   .syside-panel .syside-package-summary { color: var(--pi-muted); font: inherit; }
 `;

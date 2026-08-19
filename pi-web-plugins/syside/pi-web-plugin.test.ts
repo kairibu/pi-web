@@ -283,14 +283,87 @@ describe("bundled SysIDE browser plugin", () => {
 
     const packages = [...container.querySelectorAll(".syside-panel .syside-package-item")];
     expect(packages).toHaveLength(2);
-    expect(packages[0]?.querySelector(".syside-package-name")?.textContent).toBe("m");
-    expect(packages[1]?.querySelector(".syside-package-name")?.textContent).toBe("Cabin");
+    const firstPackageLink = packages[0]?.querySelector<HTMLButtonElement>(".syside-package-link");
+    expect(firstPackageLink?.textContent).toBe("m");
+    const secondPackageLink = packages[1]?.querySelector<HTMLButtonElement>(".syside-package-link");
+    expect(secondPackageLink?.textContent).toBe("Cabin");
+    expect(secondPackageLink?.getAttribute("title")).toBe("m::Cabin");
     expect(packages[0]?.querySelector(".syside-package-summary")?.textContent).toBe("parts: 1");
     expect(packages[1]?.querySelector(".syside-package-summary")?.textContent).toBe("parts: 1");
     expect(container.querySelectorAll(".syside-package-item .syside-count-value")).toHaveLength(0);
     expect(button(container, "Overview").getAttribute("aria-pressed")).toBe("true");
     expect(button(container, "Check").getAttribute("aria-pressed")).toBe("false");
     expect(button(container, "Elements").getAttribute("aria-pressed")).toBe("false");
+    render(null, container);
+  });
+
+  it("opens the elements view filtered to a package from the overview link", async () => {
+    const backend = backendFixture({ errors: [], survey: [packageFixture("m", ["m"]), packageFixture("Cabin", ["m", "Cabin"])] });
+    const panel = requiredPanel(activate("syside"));
+    const context = panelContext(backend.request);
+    const container = document.createElement("div");
+    document.body.append(container);
+    render(panel.render(context), container);
+    await settleBackend();
+    render(panel.render(context), container);
+
+    button(container, "Cabin").click();
+    // The package link issues exactly one list request with the package filter
+    // and no type key: a plain package click clears any stale type filter.
+    expect(backend.request).toHaveBeenCalledWith("list-elements", { packageQualifiedName: ["m", "Cabin"] });
+    expect(backend.request.mock.calls.filter(([operation]) => operation === "list-elements")).toHaveLength(1);
+    await settleBackend();
+    render(panel.render(context), container);
+
+    const submenu = container.querySelector(".syside-panel .syside-split .syside-elements-submenu");
+    if (submenu === null) throw new Error("Expected the element-view submenu inside .syside-split");
+    expect(button(container, "Elements").getAttribute("aria-pressed")).toBe("true");
+    // The <pi-web-syside-select-sync> element schedules a microtask on render
+    // to set the filter <select> values after their <option> children commit
+    // (Lit binds .value before options exist on the first submenu render).
+    await settleBackend();
+    const packageSelect = container.querySelector<HTMLSelectElement>("select[aria-label='Owning package']");
+    if (packageSelect === null) throw new Error("Expected an owning-package select");
+    expect(packageSelect.value).toBe(JSON.stringify(["m", "Cabin"]));
+    const typeSelect = container.querySelector<HTMLSelectElement>("select[aria-label='Element type']");
+    if (typeSelect === null) throw new Error("Expected an element-type select");
+    expect(typeSelect.value).toBe("");
+    render(null, container);
+  });
+
+  it("opens the elements view filtered to a package and type from a type-count link", async () => {
+    const backend = backendFixture({ errors: [], survey: [packageFixture("m", ["m"]), packageFixture("Cabin", ["m", "Cabin"])] });
+    const panel = requiredPanel(activate("syside"));
+    const context = panelContext(backend.request);
+    const container = document.createElement("div");
+    document.body.append(container);
+    render(panel.render(context), container);
+    await settleBackend();
+    render(panel.render(context), container);
+
+    const cabinRow = [...container.querySelectorAll(".syside-package-item")].find(
+      (row) => row.querySelector(".syside-package-link")?.textContent === "Cabin",
+    );
+    if (cabinRow === undefined) throw new Error("Expected a Cabin package row");
+    const countLink = cabinRow.querySelector<HTMLButtonElement>(".syside-type-count-link");
+    if (countLink === null) throw new Error("Expected a type-count link in the Cabin package row");
+    countLink.click();
+
+    expect(backend.request).toHaveBeenCalledWith("list-elements", { packageQualifiedName: ["m", "Cabin"], type: "syside.PartUsage" });
+    expect(backend.request.mock.calls.filter(([operation]) => operation === "list-elements")).toHaveLength(1);
+    await settleBackend();
+    render(panel.render(context), container);
+
+    // The <pi-web-syside-select-sync> element schedules a microtask on render
+    // to set the filter <select> values after their <option> children commit
+    // (see the package-link test).
+    await settleBackend();
+    const packageSelect = container.querySelector<HTMLSelectElement>("select[aria-label='Owning package']");
+    if (packageSelect === null) throw new Error("Expected an owning-package select");
+    expect(packageSelect.value).toBe(JSON.stringify(["m", "Cabin"]));
+    const typeSelect = container.querySelector<HTMLSelectElement>("select[aria-label='Element type']");
+    if (typeSelect === null) throw new Error("Expected an element-type select");
+    expect(typeSelect.value).toBe("syside.PartUsage");
     render(null, container);
   });
 

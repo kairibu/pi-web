@@ -104,5 +104,5 @@ function renderSysidePanel(html: HtmlTemplateTag, controller: SysideUiController
 function renderSysideSplit(html: HtmlTemplateTag, state: SysideWorkspaceUiState, controller: SysideUiController, context: WorkspacePanelContext) {
   if (state.view === "elements") return renderElementView(html, state, controller, context);
   if (state.view === "check") return renderCheckResult(html, state);
-  return renderOverview(html, state);
+  return renderOverview(html, state, controller, context);
 }
