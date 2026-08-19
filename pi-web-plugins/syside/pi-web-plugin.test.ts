@@ -13,6 +13,13 @@ import type {
 //import { elementTypeLabel } from "./browser/syside-elements-view.js";
 import plugin from "./browser/pi-web-plugin.js";
 import { SYSIDE_SEARCH_DEBOUNCE_MS } from "./browser/syside-panel-controller.js";
+import type { SysideTooltipElement } from "./browser/syside-tooltip.js";
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "pi-web-syside-tooltip": SysideTooltipElement;
+  }
+}
 
 const projectId = "project-1";
 const workspaceId = "workspace-1";
@@ -691,7 +698,13 @@ describe("bundled SysIDE browser plugin", () => {
     render(panel.render(context), container);
     const link = container.querySelector<HTMLButtonElement>(".syside-link");
     if (link === null) throw new Error("Expected a relationship link in the heritage section");
-    expect(link.title).toBe("m::Tail");
+    // The link is wrapped in a tooltip that carries its qualified name (the
+    // plain `title` attribute was removed in favor of the tooltip).
+    const tooltip = link.closest<HTMLElementTagNameMap["pi-web-syside-tooltip"]>("pi-web-syside-tooltip");
+    if (tooltip === null) {
+      throw new Error("Expected relationship link wrapped in a tooltip");
+    }
+    expect(tooltip.qualifiedName).toEqual(["m", "Tail"]);
     link.click();
     expect(backend.request).toHaveBeenCalledWith("element-details", { qualifiedName: ["m", "Tail"] });
     await settleBackend();
