@@ -44,7 +44,8 @@ export const sysidePanelStyles = `
   .syside-panel .syside-details-section p { margin: 4px 0; }
   .syside-panel .syside-details-section ul { margin: 4px 0; padding-left: 18px; }
   .syside-panel .syside-details-section li { margin: 2px 0; }
-  .syside-panel .syside-link { background: none; border: 0; color: var(--pi-accent); padding: 0; text-decoration: underline; cursor: pointer; }
+  .syside-panel .syside-link { background: none; border: 0; color: var(--pi-muted); padding: 0; text-decoration: none; cursor: pointer; }
+  .syside-panel .syside-link:visited, .syside-panel .syside-link:hover, .syside-panel .syside-link:focus-visible { color: var(--pi-muted); }
   .syside-panel .syside-diagram-placeholder { margin: 10px 0; padding: 24px 12px; border: 1px dashed var(--pi-border); border-radius: 7px; color: var(--pi-muted); text-align: center; }
   .syside-panel .syside-overview { padding: 4px 10px; }
   .syside-panel .syside-overview-project { margin: 4px 0; font-size: 12px; }
