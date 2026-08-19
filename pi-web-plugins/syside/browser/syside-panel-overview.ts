@@ -33,7 +33,7 @@ export function renderOverview(html: HtmlTemplateTag, state: SysideWorkspaceUiSt
   return renderOverviewContent(html, state);
 }
 
-/** One package card per surveyed package, with one count row per supported element type. */
+/** Compact package summary list: package name plus the non-zero element counts. */
 function renderOverviewContent(html: HtmlTemplateTag, state: SysideWorkspaceUiState) {
   // Unreachable through renderOverview (the survey is checked before the
   // call): kept only so TypeScript narrows state.survey to non-undefined here.
@@ -41,24 +41,48 @@ function renderOverviewContent(html: HtmlTemplateTag, state: SysideWorkspaceUiSt
   if (survey === undefined) return null;
   return html`
     <section class="syside-overview">
+      <header class="syside-package-header">
+        <strong>Model Overview</strong>
+      </header>
       <p class="syside-overview-project syside-muted">${survey.projectPath}</p>
-      ${survey.packages.map((pkg) => html`
-        <section class="syside-package">
-          <header class="syside-package-header">
-            <strong>${pkg.declared_name !== "" ? pkg.declared_name : qualifiedNameDisplay(pkg.qualified_name)}</strong>
-            ${pkg.qualified_name.length === 0 ? null : html`<span class="syside-package-qn syside-muted">${qualifiedNameDisplay(pkg.qualified_name)}</span>`}
-          </header>
-          <ul class="syside-package-counts">
-            ${SYSIDE_ELEMENT_TYPES.map((type) => html`
-              <li>
-                <span class="syside-count-type">${elementTypeLabel(type)}</span>
-                <span class="syside-count-value">${String(pkg.element_counts[type])}</span>
-              </li>
-            `)}
-          </ul>
-        </section>
-      `)}
+      <ul class="syside-package-list">
+        ${survey.packages.map((pkg) => html`
+          <li class="syside-package-item">
+            <span class="syside-package-name">${pkg.declared_name !== "" ? pkg.declared_name : qualifiedNameDisplay(pkg.qualified_name)}</span>
+            <span class="syside-package-summary">${summarizePackageCounts(pkg)}</span>
+          </li>
+        `)}
+      </ul>
     </section>
   `;
+}
+
+function summarizePackageCounts(pkg: { element_counts: Record<string, number> }): string {
+  const counts = SYSIDE_ELEMENT_TYPES.map((type) => {
+    const count = pkg.element_counts[type];
+    if (count === undefined || count <= 0) return null;
+    return `${compactElementTypeLabel(type)}: ${count.toString()}`;
+  }).filter((entry): entry is string => entry !== null);
+
+  return counts.length === 0 ? "no counted elements" : counts.join(", ");
+}
+
+function compactElementTypeLabel(type: string): string {
+  switch (type) {
+    case "syside.PartUsage":
+      return "parts";
+    case "syside.PartDefinition":
+      return "part defs";
+    case "syside.RequirementUsage":
+      return "requirements";
+    case "syside.RequirementDefinition":
+      return "requirement defs";
+    case "syside.ActionUsage":
+      return "actions";
+    case "syside.ActionDefinition":
+      return "action defs";
+    default:
+      return elementTypeLabel(type);
+  }
 }
 

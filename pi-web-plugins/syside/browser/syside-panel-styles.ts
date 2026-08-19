@@ -48,11 +48,9 @@ export const sysidePanelStyles = `
   .syside-panel .syside-diagram-placeholder { margin: 10px 0; padding: 24px 12px; border: 1px dashed var(--pi-border); border-radius: 7px; color: var(--pi-muted); text-align: center; }
   .syside-panel .syside-overview { padding: 4px 10px; }
   .syside-panel .syside-overview-project { margin: 4px 0; font-size: 12px; }
-  .syside-panel .syside-package { margin: 10px 0; }
   .syside-panel .syside-package-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
-  .syside-panel .syside-package-qn { font-size: 12px; }
-  .syside-panel .syside-package-counts { list-style: none; margin: 4px 0 0; padding: 0 0 0 12px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 16px; }
-  .syside-panel .syside-package-counts li { display: flex; justify-content: space-between; gap: 8px; }
-  .syside-panel .syside-count-type { color: var(--pi-muted); }
-  .syside-panel .syside-count-value { font-weight: 600; }
+  .syside-panel .syside-package-list { list-style: none; margin: 8px 0 0; padding: 0 0 0 12px; }
+  .syside-panel .syside-package-item { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; margin: 6px 0; line-height: 1.5; color: var(--pi-muted); }
+  .syside-panel .syside-package-name { color: var(--pi-text); font: inherit; font-weight: normal; }
+  .syside-panel .syside-package-summary { color: var(--pi-muted); font: inherit; }
 `;

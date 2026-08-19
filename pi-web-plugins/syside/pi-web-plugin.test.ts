@@ -9,8 +9,8 @@ import type {
   WorkspaceBackend,
   WorkspacePanelContext,
 } from "@jmfederico/pi-web/plugin-api";
-import { SYSIDE_ELEMENT_TYPES } from "./browser/syside-contract.js";
-import { elementTypeLabel } from "./browser/syside-elements-view.js";
+//import { SYSIDE_ELEMENT_TYPES } from "./browser/syside-contract.js";
+//import { elementTypeLabel } from "./browser/syside-elements-view.js";
 import plugin from "./browser/pi-web-plugin.js";
 import { SYSIDE_SEARCH_DEBOUNCE_MS } from "./browser/syside-panel-controller.js";
 
@@ -271,7 +271,7 @@ describe("bundled SysIDE browser plugin", () => {
     render(null, container);
   });
 
-  it("renders the model overview with per-package element counts on initial connect", async () => {
+  it("renders the model overview as a compact package summary list on initial connect", async () => {
     const backend = backendFixture({ errors: [], survey: [packageFixture("m", ["m"]), packageFixture("Cabin", ["m", "Cabin"])] });
     const panel = requiredPanel(activate("syside"));
     const context = panelContext(backend.request);
@@ -281,24 +281,45 @@ describe("bundled SysIDE browser plugin", () => {
     await settleBackend();
     render(panel.render(context), container);
 
-    const packages = [...container.querySelectorAll(".syside-panel .syside-package")];
+    const packages = [...container.querySelectorAll(".syside-panel .syside-package-item")];
     expect(packages).toHaveLength(2);
-    expect(packages[0]?.querySelector(".syside-package-header strong")?.textContent).toBe("m");
-    expect(packages[1]?.querySelector(".syside-package-header strong")?.textContent).toBe("Cabin");
-    // Every supported element type renders one count row per package, zero
-    // counts included: the render is driven by SYSIDE_ELEMENT_TYPES.map and
-    // the contract parser guarantees every count key is present.
-    for (const card of packages) {
-      expect(card.querySelectorAll(".syside-count-type")).toHaveLength(SYSIDE_ELEMENT_TYPES.length);
-      expect(card.querySelectorAll(".syside-count-value")).toHaveLength(SYSIDE_ELEMENT_TYPES.length);
-    }
-    // The fixture gives the first package exactly one part usage and nothing
-    // else; the explicit "0" rows pin the include-zeros criterion.
-    expect([...(packages[0]?.querySelectorAll(".syside-count-value") ?? [])].map((node) => node.textContent)).toEqual(["1", "0", "0", "0", "0", "0"]);
-    expect([...(packages[0]?.querySelectorAll(".syside-count-type") ?? [])].map((node) => node.textContent)).toEqual(SYSIDE_ELEMENT_TYPES.map((type) => elementTypeLabel(type)));
+    expect(packages[0]?.querySelector(".syside-package-name")?.textContent).toBe("m");
+    expect(packages[1]?.querySelector(".syside-package-name")?.textContent).toBe("Cabin");
+    expect(packages[0]?.querySelector(".syside-package-summary")?.textContent).toBe("parts: 1");
+    expect(packages[1]?.querySelector(".syside-package-summary")?.textContent).toBe("parts: 1");
+    expect(container.querySelectorAll(".syside-package-item .syside-count-value")).toHaveLength(0);
     expect(button(container, "Overview").getAttribute("aria-pressed")).toBe("true");
     expect(button(container, "Check").getAttribute("aria-pressed")).toBe("false");
     expect(button(container, "Elements").getAttribute("aria-pressed")).toBe("false");
+    render(null, container);
+  });
+
+  it("shows no counted elements when a surveyed package has no non-zero element counts", async () => {
+    const backend = backendFixture({
+      errors: [],
+      survey: [{
+        declared_name: "Empty",
+        qualified_name: ["Empty"],
+        element_counts: {
+          "syside.PartUsage": 0,
+          "syside.PartDefinition": 0,
+          "syside.RequirementUsage": 0,
+          "syside.RequirementDefinition": 0,
+          "syside.ActionUsage": 0,
+          "syside.ActionDefinition": 0,
+        },
+      }],
+    });
+    const panel = requiredPanel(activate("syside"));
+    const context = panelContext(backend.request);
+    const container = document.createElement("div");
+    document.body.append(container);
+    render(panel.render(context), container);
+    await settleBackend();
+    render(panel.render(context), container);
+
+    const summary = container.querySelector(".syside-package-summary")?.textContent;
+    expect(summary).toBe("no counted elements");
     render(null, container);
   });
 
@@ -322,7 +343,7 @@ describe("bundled SysIDE browser plugin", () => {
     resolveSurvey?.({ projectPath: "/model", packages: [packageFixture("Cabin", ["m", "Cabin"])] });
     await settleBackend();
     render(panel.render(context), container);
-    expect(container.querySelector(".syside-package")).not.toBeNull();
+    expect(container.querySelector(".syside-package-item")).not.toBeNull();
     render(null, container);
   });
 
@@ -351,7 +372,7 @@ describe("bundled SysIDE browser plugin", () => {
     await settleBackend();
     render(panel.render(context), container);
     expect(container.querySelector(".syside-elements-submenu")).toBeNull();
-    expect(container.querySelector(".syside-package")?.textContent).toContain("Cabin");
+    expect(container.querySelector(".syside-package-item")?.textContent).toContain("Cabin");
     render(null, container);
   });
 
@@ -364,7 +385,7 @@ describe("bundled SysIDE browser plugin", () => {
     render(panel.render(context), container);
     await settleBackend();
     render(panel.render(context), container);
-    expect(container.querySelector(".syside-package")).not.toBeNull();
+    expect(container.querySelector(".syside-package-item")).not.toBeNull();
 
     button(container, "Check").click();
     await settleBackend();
