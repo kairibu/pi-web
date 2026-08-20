@@ -13,11 +13,13 @@ import type {
 //import { elementTypeLabel } from "./browser/syside-elements-view.js";
 import plugin from "./browser/pi-web-plugin.js";
 import { SYSIDE_SEARCH_DEBOUNCE_MS } from "./browser/syside-panel-controller.js";
+import type { SysideActionPaletteElement } from "./browser/syside-panel-palette.js";
 import type { SysideTooltipElement } from "./browser/syside-tooltip.js";
 
 declare global {
   interface HTMLElementTagNameMap {
     "pi-web-syside-tooltip": SysideTooltipElement;
+    "pi-web-syside-action-palette": SysideActionPaletteElement;
   }
 }
 
@@ -651,6 +653,64 @@ describe("bundled SysIDE browser plugin", () => {
     expect(container.querySelector(".syside-details-header strong")?.textContent).toBe("m::Wing");
     expect(container.querySelector(".syside-details-filepath")?.textContent).toBe("/model/Model.sysml");
     expect(container.querySelector(".syside-element-row.is-selected")).not.toBeNull();
+    // The detail view is split: content on top, the action palette below, with
+    // the view toggle inside the palette aside and the header no longer
+    // wrapped in the relationship-link tooltip.
+    const split = container.querySelector(".syside-elements-details");
+    const content = container.querySelector(".syside-details-content");
+    const aside = container.querySelector(".syside-action-palette");
+    if (split === null || content === null || aside === null) throw new Error("Expected details-content and action-palette split");
+    expect(content.compareDocumentPosition(aside) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    const header = container.querySelector(".syside-details-header");
+    if (header === null) throw new Error("Expected a details header");
+    expect(header.closest("pi-web-syside-tooltip")).toBeNull();
+    expect(aside.querySelector(".syside-view-toggle")).not.toBeNull();
+    const palette = container.querySelector<HTMLElementTagNameMap["pi-web-syside-action-palette"]>("pi-web-syside-action-palette");
+    if (palette === null) throw new Error("Expected an action palette in the details view");
+    expect(palette.qualifiedName).toEqual(["m", "Wing"]);
+    expect(palette.filepath).toBe("/model/Model.sysml");
+    render(null, container);
+  });
+
+  it("inserts investigate and task prompts from the action palette", async () => {
+    const backend = backendFixture({
+      errors: [],
+      elements: [elementFixture("syside.PartUsage", "Wing", ["m", "Wing"], null)],
+    });
+    const panel = requiredPanel(activate("syside"));
+    const container = document.createElement("div");
+    const insertText = vi.fn();
+    const context = panelContext(backend.request, sysideWorkspace, "local", () => undefined, insertText);
+    document.body.append(container);
+    render(panel.render(context), container);
+    await settleBackend();
+    render(panel.render(context), container);
+    button(container, "Elements").click();
+    await settleBackend();
+    render(panel.render(context), container);
+    button(container, "Wing").click();
+    await settleBackend();
+    render(panel.render(context), container);
+
+    const palette = container.querySelector<HTMLElementTagNameMap["pi-web-syside-action-palette"]>("pi-web-syside-action-palette");
+    if (palette === null) throw new Error("Expected an action palette");
+    const investigate = palette.shadowRoot?.querySelector<HTMLButtonElement>(".palette-investigate");
+    if (investigate === undefined || investigate === null) throw new Error("Expected an Investigate button in the palette");
+    investigate.click();
+    expect(insertText).toHaveBeenCalledWith(
+      "Investigate m::Wing and summarise its function interfaces and requirements. The element is located in /model/Model.sysml",
+    );
+
+    const task = palette.shadowRoot?.querySelector<HTMLButtonElement>(".palette-task");
+    if (task === undefined || task === null) throw new Error("Expected a Task button in the palette");
+    task.click();
+    const input = palette.shadowRoot?.querySelector<HTMLInputElement>(".palette-input");
+    if (input === undefined || input === null) throw new Error("Expected a task input in the palette");
+    input.value = "Add validation";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(insertText).toHaveBeenLastCalledWith(
+      "Perform task \"Add validation\" for element m::Wing. The element is located in /model/Model.sysml",
+    );
     render(null, container);
   });
 
@@ -949,7 +1009,7 @@ async function mountAndOpenElements(
   return context;
 }
 
-function panelContext(request: WorkspaceBackend["request"] | undefined, workspace = sysideWorkspace, machineId = "local", hostRequestRender: () => void = () => undefined): WorkspacePanelContext {
+function panelContext(request: WorkspaceBackend["request"] | undefined, workspace = sysideWorkspace, machineId = "local", hostRequestRender: () => void = () => undefined, insertText: (text: string) => void = () => undefined): WorkspacePanelContext {
   const noop = () => undefined;
   return {
     machine: { id: machineId, name: machineId, kind: machineId === "local" ? "local" : "remote" },
@@ -964,7 +1024,7 @@ function panelContext(request: WorkspaceBackend["request"] | undefined, workspac
     },
     ...(request === undefined ? {} : { backend: { request } }),
     host: { requestRender: hostRequestRender },
-    prompt: { insertText: noop, getText: () => "", getSelection: () => null },
+    prompt: { insertText, getText: () => "", getSelection: () => null },
     terminal: { open: noop, runCommand: () => Promise.reject(new Error("not implemented")) },
   };
 }

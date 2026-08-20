@@ -13,11 +13,13 @@ import {
 } from "./syside-elements-view.js";
 import type { SysideUiController } from "./syside-panel-controller.js";
 import type { SysideWorkspaceUiState } from "./syside-panel-state.js";
+import { defineSysideActionPaletteElement } from "./syside-panel-palette.js";
 import { defineSysideTooltipElement } from "./syside-tooltip.js";
 
 export function renderElementView(html: HtmlTemplateTag, state: SysideWorkspaceUiState, controller: SysideUiController, context: WorkspacePanelContext) {
   defineSysideSelectSyncElement();
   defineSysideTooltipElement();
+  defineSysideActionPaletteElement();
   return html`
     <section class="syside-elements">
       ${renderElementsSubmenu(html, state, controller, context)}
@@ -117,30 +119,33 @@ function renderElementDetails(html: HtmlTemplateTag, state: SysideWorkspaceUiSta
   const details = state.details;
   if (details === undefined) return null;
   return html`
-    <header class="syside-details-header">
-      <pi-web-syside-tooltip .qualifiedName=${details.qualified_name} .filepath=${details.filepath} .context=${context}>
+    <div class="syside-details-content">
+      <header class="syside-details-header">
         <strong>${qualifiedNameDisplay(details.qualified_name)}</strong>
-      </pi-web-syside-tooltip>
-      <span class="syside-muted">${elementTypeLabel(details.type)}</span>
-      <small class="syside-details-filepath">${details.filepath}</small>
-    </header>
-    <div class="syside-view-toggle" role="group" aria-label="View mode">
-      <button
-        type="button"
-        class=${state.diagramMode ? "syside-view-button" : "syside-view-button is-selected"}
-        aria-pressed=${String(!state.diagramMode)}
-        @click=${() => { controller.setDiagramMode(context, false); }}
-      >Text</button>
-      <button
-        type="button"
-        class=${state.diagramMode ? "syside-view-button is-selected" : "syside-view-button"}
-        aria-pressed=${String(state.diagramMode)}
-        @click=${() => { controller.setDiagramMode(context, true); }}
-      >Diagram</button>
+        <span class="syside-muted">${elementTypeLabel(details.type)}</span>
+        <small class="syside-details-filepath">${details.filepath}</small>
+      </header>
+      ${state.diagramMode
+        ? html`<div class="syside-diagram-placeholder">Diagram view coming soon</div>`
+        : renderTextualDetails(html, details, controller, context)}
     </div>
-    ${state.diagramMode
-      ? html`<div class="syside-diagram-placeholder">Diagram view coming soon</div>`
-      : renderTextualDetails(html, details, controller, context)}
+    <aside class="syside-action-palette">
+      <div class="syside-view-toggle" role="group" aria-label="View mode">
+        <button
+          type="button"
+          class=${state.diagramMode ? "syside-view-button" : "syside-view-button is-selected"}
+          aria-pressed=${String(!state.diagramMode)}
+          @click=${() => { controller.setDiagramMode(context, false); }}
+        >Text</button>
+        <button
+          type="button"
+          class=${state.diagramMode ? "syside-view-button is-selected" : "syside-view-button"}
+          aria-pressed=${String(state.diagramMode)}
+          @click=${() => { controller.setDiagramMode(context, true); }}
+        >Diagram</button>
+      </div>
+      <pi-web-syside-action-palette .qualifiedName=${details.qualified_name} .filepath=${details.filepath} .context=${context}></pi-web-syside-action-palette>
+    </aside>
   `;
 }
 
