@@ -152,11 +152,11 @@ function renderElementDetails(html: HtmlTemplateTag, state: SysideWorkspaceUiSta
 function renderTextualDetails(html: HtmlTemplateTag, details: SysMlElementDetail, controller: SysideUiController, context: WorkspacePanelContext) {
   return html`
     ${renderStringSection(html, "Documentation", details.documentation)}
-    ${renderElementListSection(html, "Heritage", details.heritage, controller, context, details.qualified_name)}
-    ${renderElementListSection(html, "Subsetting", details.subsetting, controller, context, details.qualified_name)}
-    ${renderElementSection(html, "Subject", details.subject, controller, context, details.qualified_name)}
-    ${renderElementListSection(html, "Inputs", details.inputs, controller, context, details.qualified_name)}
-    ${renderElementListSection(html, "Outputs", details.outputs, controller, context, details.qualified_name)}
+    ${renderElementListSection(html, "Heritage", details.heritage, controller, context)}
+    ${renderElementListSection(html, "Subsetting", details.subsetting, controller, context)}
+    ${renderElementSection(html, "Subject", details.subject, controller, context)}
+    ${renderElementListSection(html, "Inputs", details.inputs, controller, context)}
+    ${renderElementListSection(html, "Outputs", details.outputs, controller, context)}
   `;
 }
 
@@ -171,39 +171,39 @@ function renderStringSection(html: HtmlTemplateTag, label: string, values: strin
   `;
 }
 
-function renderElementListSection(html: HtmlTemplateTag, label: string, elements: SysMlElement[] | null, controller: SysideUiController, context: WorkspacePanelContext, from_qn: string[]) {
+function renderElementListSection(html: HtmlTemplateTag, label: string, elements: SysMlElement[] | null, controller: SysideUiController, context: WorkspacePanelContext) {
   return html`
     <section class="syside-details-section">
       <h3>${label}</h3>
       ${elements === null || elements.length === 0
         ? html`<p class="syside-muted">—</p>`
-        : html`<ul>${elements.map((element) => renderElementLink(html, element, controller, context, from_qn))}</ul>`}
+        : html`<ul>${elements.map((element) => renderElementLink(html, element, controller, context))}</ul>`}
     </section>
   `;
 }
 
-function renderElementSection(html: HtmlTemplateTag, label: string, element: SysMlElement | null, controller: SysideUiController, context: WorkspacePanelContext, from_qn: string[]) {
+function renderElementSection(html: HtmlTemplateTag, label: string, element: SysMlElement | null, controller: SysideUiController, context: WorkspacePanelContext) {
   return html`
     <section class="syside-details-section">
       <h3>${label}</h3>
       ${element === null
         ? html`<p class="syside-muted">—</p>`
-        : html`<ul>${renderElementLink(html, element, controller, context, from_qn)}</ul>`}
+        : html`<ul>${renderElementLink(html, element, controller, context)}</ul>`}
     </section>
   `;
 }
 
-function renderElementLink(html: HtmlTemplateTag, element: SysMlElement, controller: SysideUiController, context: WorkspacePanelContext, from_qn: string[]) {
+function renderElementLink(html: HtmlTemplateTag, element: SysMlElement, controller: SysideUiController, context: WorkspacePanelContext) {
   //todo: from_qn is not used, because its not handled by tooltip. 
   return html`
     <li>
-      <pi-web-syside-tooltip .qualifiedName=${element.qualified_name} .context=${context} .from_qn=${from_qn}>
+      
         <button
           type="button"
           class="syside-link"
           @click=${() => { controller.selectElement(context, element.qualified_name); }}
         >${elementDisplayName(element)}</button>
-      </pi-web-syside-tooltip>
+      
     </li>
   `;
 }
