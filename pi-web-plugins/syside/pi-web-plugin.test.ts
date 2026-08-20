@@ -9,8 +9,6 @@ import type {
   WorkspaceBackend,
   WorkspacePanelContext,
 } from "@jmfederico/pi-web/plugin-api";
-//import { SYSIDE_ELEMENT_TYPES } from "./browser/syside-contract.js";
-//import { elementTypeLabel } from "./browser/syside-elements-view.js";
 import plugin from "./browser/pi-web-plugin.js";
 import { SYSIDE_SEARCH_DEBOUNCE_MS } from "./browser/syside-panel-controller.js";
 import type { SysideActionPaletteElement } from "./browser/syside-panel-palette.js";
@@ -758,9 +756,6 @@ describe("bundled SysIDE browser plugin", () => {
     render(panel.render(context), container);
     const link = container.querySelector<HTMLButtonElement>(".syside-link");
     if (link === null) throw new Error("Expected a relationship link in the heritage section");
-    // The link is wrapped in a tooltip that carries its qualified name (the
-    // plain `title` attribute was removed in favor of the tooltip).
-
     link.click();
     expect(backend.request).toHaveBeenCalledWith("element-details", { qualifiedName: ["m", "Tail"] });
     await settleBackend();
