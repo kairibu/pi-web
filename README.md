@@ -5,9 +5,7 @@ this fork of PI WEB includes the SysIDE plugin to work with an AI agent on your 
 - and [PI WEB](https://pi-web.dev/)
 - and [sensmetry's syside](https://www.sensmetry.com) plugin (commercial software, you need a license)
 
-The SysIDE plugin works best with the skills and tools from [bulb engineering](https://github.com/kairibu/bulb) installed.
-
-[Pi](https://pi.dev) is lightweight and saves context and tools and skills are kept simple to support on-prem, local AI models. It has been tested with Qwen3.6 and gpt-oss-120.
+The SysIDE plugin works best with the skills and tools from [bulb engineering](https://github.com/kairibu/bulb) installed. [Pi](https://pi.dev) is lightweight and saves context and tools and skills are kept simple to support on-prem, local AI models. This frontend and the skills and tools have been tested with Qwen3.6 and gpt-oss-120.
 
 Currently you need to install PI WEB from this fork since a change was necessary to its core to load the SysIDE plugin. When this gets resolved the plugin will be shipped separately which would be better for production use.
 
