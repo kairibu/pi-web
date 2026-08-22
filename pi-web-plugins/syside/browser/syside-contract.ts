@@ -17,6 +17,10 @@ export const SYSIDE_ELEMENT_TYPES = [
   "syside.RequirementDefinition",
   "syside.ActionUsage",
   "syside.ActionDefinition",
+  "syside.PortUsage",
+  "syside.PortDefinition",
+  "syside.InterfaceUsage",
+  "syside.InterfaceDefinition",
 ] as const;
 
 /** JSON result of a SysIDE check: the error messages reported for the project. */

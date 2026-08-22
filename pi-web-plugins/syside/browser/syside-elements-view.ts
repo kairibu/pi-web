@@ -12,6 +12,9 @@ export const SYSIDE_ELEMENT_TYPE_LABELS: Record<string, string> = {
   "syside.RequirementDefinition": "req def",
   "syside.ActionUsage": "action",
   "syside.ActionDefinition": "action def",
+  "syside.PortUsage": "port",
+  "syside.PortDefinition": "port def",
+  "syside.InterfaceUsage": "interface",
   "syside.InterfaceDefinition": "interface def",
 };
 

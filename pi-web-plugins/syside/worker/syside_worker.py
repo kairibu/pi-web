@@ -56,6 +56,10 @@ SUPPORTED_ELEMENT_TYPES: tuple[Any, ...] = (
     syside.RequirementDefinition,
     syside.ActionUsage,
     syside.ActionDefinition,
+    syside.PortUsage,
+    syside.PortDefinition,
+    syside.InterfaceUsage,
+    syside.InterfaceDefinition,
 )
 
 # Contract type names ("syside.PartUsage", ...) keyed to their classes. The

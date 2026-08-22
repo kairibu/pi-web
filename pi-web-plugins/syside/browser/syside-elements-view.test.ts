@@ -54,13 +54,17 @@ describe("elementShortName", () => {
 });
 
 describe("elementTypeLabel", () => {
-  it("maps all six supported contract types to friendly labels", () => {
+  it("maps all ten supported contract types to friendly labels", () => {
     expect(elementTypeLabel("syside.PartUsage")).toBe("part");
     expect(elementTypeLabel("syside.PartDefinition")).toBe("part def");
     expect(elementTypeLabel("syside.RequirementUsage")).toBe("req");
     expect(elementTypeLabel("syside.RequirementDefinition")).toBe("req def");
     expect(elementTypeLabel("syside.ActionUsage")).toBe("action");
     expect(elementTypeLabel("syside.ActionDefinition")).toBe("action def");
+    expect(elementTypeLabel("syside.PortUsage")).toBe("port");
+    expect(elementTypeLabel("syside.PortDefinition")).toBe("port def");
+    expect(elementTypeLabel("syside.InterfaceUsage")).toBe("interface");
+    expect(elementTypeLabel("syside.InterfaceDefinition")).toBe("interface def");
   });
 
   it("pins every supported type to a label and falls back to the raw type", () => {

@@ -27,6 +27,10 @@ describe("SysIDE operation constants", () => {
       "syside.RequirementDefinition",
       "syside.ActionUsage",
       "syside.ActionDefinition",
+      "syside.PortUsage",
+      "syside.PortDefinition",
+      "syside.InterfaceUsage",
+      "syside.InterfaceDefinition",
     ]);
   });
 });
@@ -173,6 +177,10 @@ describe("parseSysideSurveyResponse", () => {
             "syside.RequirementDefinition": 0,
             "syside.ActionUsage": 0,
             "syside.ActionDefinition": 0,
+            "syside.PortUsage": 0,
+            "syside.PortDefinition": 0,
+            "syside.InterfaceUsage": 0,
+            "syside.InterfaceDefinition": 0,
           },
         },
       ],
@@ -213,5 +221,23 @@ describe("parseSysideSurveyResponse", () => {
       projectPath: "/repo",
       packages: [{ declared_name: "m", qualified_name: ["m"], element_counts: { "syside.PartUsage": 0 } }],
     })).toThrow("Missing count for element type syside.PartDefinition in packages entry 0");
+    expect(() => parseSysideSurveyResponse({
+      projectPath: "/repo",
+      packages: [{
+        declared_name: "m",
+        qualified_name: ["m"],
+        element_counts: {
+          "syside.PartUsage": 0,
+          "syside.PartDefinition": 0,
+          "syside.RequirementUsage": 0,
+          "syside.RequirementDefinition": 0,
+          "syside.ActionUsage": 0,
+          "syside.ActionDefinition": 0,
+          "syside.PortUsage": 0,
+          "syside.PortDefinition": 0,
+          "syside.InterfaceUsage": 0,
+        },
+      }],
+    })).toThrow("Missing count for element type syside.InterfaceDefinition in packages entry 0");
   });
 });

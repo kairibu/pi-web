@@ -387,6 +387,10 @@ describe("bundled SysIDE browser plugin", () => {
           "syside.RequirementDefinition": 0,
           "syside.ActionUsage": 0,
           "syside.ActionDefinition": 0,
+          "syside.PortUsage": 0,
+          "syside.PortDefinition": 0,
+          "syside.InterfaceUsage": 0,
+          "syside.InterfaceDefinition": 0,
         },
       }],
     });
@@ -1097,6 +1101,10 @@ function packageFixture(declared_name: string, qualified_name: string[]): JsonVa
       "syside.RequirementDefinition": 0,
       "syside.ActionUsage": 0,
       "syside.ActionDefinition": 0,
+      "syside.PortUsage": 0,
+      "syside.PortDefinition": 0,
+      "syside.InterfaceUsage": 0,
+      "syside.InterfaceDefinition": 0,
     },
   };
 }
