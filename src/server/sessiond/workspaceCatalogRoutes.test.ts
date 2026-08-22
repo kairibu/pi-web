@@ -7,6 +7,7 @@ import type { ServerPluginProviderContribution } from "../plugins/serverPluginRu
 import { ProjectScopedSpawnTargetResolver } from "../sessions/spawnTargetResolver.js";
 import type { Project } from "../types.js";
 import { createWorkspaceProviderRuntimeSnapshot } from "../workspaces/workspaceCatalog.js";
+import { WorkspaceCapabilityRegistry } from "../workspaces/workspaceCapabilityRegistry.js";
 import { WorkspaceProviderRegistry } from "../workspaces/workspaceProviderRegistry.js";
 import { registerWorkspaceCatalogRoutes } from "./workspaceCatalogRoutes.js";
 
@@ -105,6 +106,7 @@ describe("session daemon workspace catalog routes", () => {
           list: () => Promise.resolve([providerWorkspace("fallback", hostPath("/fallback"), true)]),
         }),
       ],
+      capabilities: new WorkspaceCapabilityRegistry({ contributions: [], logger: { warn: vi.fn() } }),
       logger: { warn: vi.fn() },
       pathInspector: () => true,
     });
@@ -168,6 +170,7 @@ function projectReader() {
 function registryFor(workspaceProvider: WorkspaceProvider): WorkspaceProviderRegistry {
   return new WorkspaceProviderRegistry({
     contributions: [contribution("owner", workspaceProvider)],
+    capabilities: new WorkspaceCapabilityRegistry({ contributions: [], logger: { warn: vi.fn() } }),
     logger: { warn: vi.fn() },
     pathInspector: () => true,
   });

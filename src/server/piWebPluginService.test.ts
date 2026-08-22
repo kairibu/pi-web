@@ -14,9 +14,13 @@ const originalDockerRuntime = process.env["PI_WEB_DOCKER_RUNTIME"];
 const originalDockerMode = process.env["PI_WEB_DOCKER_MODE"];
 const originalDockerDevRepoRoot = process.env["PI_WEB_DOCKER_DEV_REPO_ROOT"];
 const originalDockerInstallDir = process.env["PI_WEB_DOCKER_INSTALL_DIR"];
+const originalPiWebConfig = process.env["PI_WEB_CONFIG"];
 
 beforeEach(async () => {
   tempDir = await mkdtemp(join(tmpdir(), "pi-web-plugin-service-test-"));
+  // Point PI_WEB_CONFIG at a nonexistent path inside the test temp dir so tests relying on
+  // the catalog's default configProvider are isolated from the host PI WEB config.
+  process.env["PI_WEB_CONFIG"] = join(tempDir, "config.json");
 });
 
 afterEach(async () => {
@@ -24,6 +28,7 @@ afterEach(async () => {
   restoreEnv("PI_WEB_DOCKER_MODE", originalDockerMode);
   restoreEnv("PI_WEB_DOCKER_DEV_REPO_ROOT", originalDockerDevRepoRoot);
   restoreEnv("PI_WEB_DOCKER_INSTALL_DIR", originalDockerInstallDir);
+  restoreEnv("PI_WEB_CONFIG", originalPiWebConfig);
   await rm(tempDir, { recursive: true, force: true });
 });
 

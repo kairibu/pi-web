@@ -32,7 +32,7 @@ async function buildDirectory(sourceDir, targetDir) {
     const targetPath = resolve(targetDir, entry.name);
 
     if (entry.isDirectory()) {
-      if (entry.name === "node_modules") continue;
+      if (entry.name === "node_modules" || entry.name === "__pycache__") continue;
       const result = await buildDirectory(sourcePath, targetPath);
       copied += result.copied;
       transpiled += result.transpiled;
@@ -84,7 +84,7 @@ async function findPluginDirs(dir) {
   const entries = await readDirectory(dir);
   const dirs = [dir];
   for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name === "node_modules") continue;
+    if (!entry.isDirectory() || entry.name === "node_modules" || entry.name === "__pycache__") continue;
     dirs.push(...await findPluginDirs(resolve(dir, entry.name)));
   }
   return dirs.sort((left, right) => left.localeCompare(right));

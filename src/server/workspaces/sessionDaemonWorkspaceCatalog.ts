@@ -4,6 +4,7 @@ import type { ServerPluginSafeStart } from "../../serverPluginRecovery.js";
 import type {
   JsonObject,
   JsonValue,
+  WorkspaceCapability,
   WorkspaceListing,
   WorkspaceProviderAuthorityResolution,
   WorkspaceProviderDiagnostic,
@@ -187,6 +188,9 @@ function parseWorkspace(value: unknown, label: string): WorkspaceListing {
   if (!isAbsolute(path)) throw protocolError(`${label} path must be absolute`);
   const provider = value["provider"] === undefined ? undefined : parseProvider(value["provider"], label);
   const removal = value["removal"] === undefined ? undefined : parseRemoval(value["removal"], label);
+  const capabilities = value["capabilities"] === undefined
+    ? undefined
+    : parseCapabilities(value["capabilities"], label);
   return Object.freeze({
     id: requireString(value, "id", label),
     projectId: requireString(value, "projectId", label),
@@ -195,6 +199,19 @@ function parseWorkspace(value: unknown, label: string): WorkspaceListing {
     isMain: requireBoolean(value, "isMain", label),
     ...(provider === undefined ? {} : { provider }),
     ...(removal === undefined ? {} : { removal }),
+    ...(capabilities === undefined ? {} : { capabilities: Object.freeze(capabilities) }),
+  });
+}
+
+function parseCapabilities(value: unknown, workspaceLabel: string): WorkspaceCapability[] {
+  const label = `${workspaceLabel} capabilities`;
+  if (!Array.isArray(value)) throw protocolError(`${label} must be an array`);
+  return value.map((item, index) => {
+    if (!isRecord(item)) throw protocolError(`${label} item ${String(index + 1)} must be an object`);
+    return Object.freeze({
+      pluginId: requirePluginId(item, "pluginId", `${label} item ${String(index + 1)}`),
+      id: requireString(item, "id", `${label} item ${String(index + 1)}`),
+    });
   });
 }
 

@@ -9,6 +9,7 @@ import type { TerminalCommandRun, WorkspaceListing } from "../../shared/apiTypes
 import type { ServerPluginProviderContribution } from "../plugins/serverPluginRuntime.js";
 import type { Project } from "../types.js";
 import type { RunTerminalCommandOptions } from "../terminals/terminalService.js";
+import { WorkspaceCapabilityRegistry } from "./workspaceCapabilityRegistry.js";
 import {
   WorkspaceProviderRegistry,
   type WorkspaceProviderRemovalTarget,
@@ -406,6 +407,7 @@ describe("WorkspaceRemovalService", () => {
 function registryFor(provider: WorkspaceProvider): WorkspaceProviderRegistry {
   return new WorkspaceProviderRegistry({
     contributions: [contribution("neutral", provider)],
+    capabilities: new WorkspaceCapabilityRegistry({ contributions: [], logger: { warn: vi.fn() } }),
     logger: { warn: vi.fn() },
     pathInspector: () => true,
   });

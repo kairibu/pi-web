@@ -13,6 +13,9 @@ import type {
   ServerPluginHealth,
   ServerPluginLogger,
   WorkspaceProvider,
+  CapabilityRequestContext,
+  CapabilityWorkspace,
+  ProjectCapability,
 } from "../../server-plugin-api.js";
 import type { PiWebPluginScope } from "../../shared/apiTypes.js";
 import type { ServerPluginSafeStart } from "../../serverPluginRecovery.js";
@@ -51,6 +54,19 @@ export interface ServerPluginProviderContribution {
   provider: WorkspaceProvider;
 }
 
+/** One non-owning project capability contributed by an active server plugin. */
+export interface ServerPluginCapabilityContribution {
+  pluginId: string;
+  pluginName: string;
+  packageRoot: string;
+  source: string;
+  scope: PiWebPluginScope;
+  moduleRevision: string;
+  /** Plugin-local capability id. */
+  capabilityId: string;
+  capability: ProjectCapability;
+}
+
 export interface ServerPluginHealthInspection {
   pluginId: string;
   health: ServerPluginHealth;
@@ -82,6 +98,7 @@ interface ActiveServerPlugin {
   plugin: PiWebServerPlugin;
   activation: ServerPluginActivation;
   contribution?: ServerPluginProviderContribution;
+  capabilityContributions?: readonly ServerPluginCapabilityContribution[];
 }
 
 const DEFAULT_LIFECYCLE_TIMEOUT_MS = 10_000;
@@ -152,6 +169,10 @@ export class ServerPluginRuntime {
 
   providerContributions(): readonly ServerPluginProviderContribution[] {
     return Object.freeze(this.activePlugins.flatMap((active) => active.contribution === undefined ? [] : [active.contribution]));
+  }
+
+  capabilityContributions(): readonly ServerPluginCapabilityContribution[] {
+    return Object.freeze(this.activePlugins.flatMap((active) => active.capabilityContributions ?? []));
   }
 
   async inspectHealth(): Promise<readonly ServerPluginHealthInspection[]> {
@@ -269,11 +290,24 @@ export class ServerPluginRuntime {
             moduleRevision: requireServerModule(entry).revision,
             provider: loadedActivation.workspaceProvider,
           });
+      const capabilityContributions = loadedActivation.capabilities === undefined
+        ? undefined
+        : Object.freeze(loadedActivation.capabilities.map((capability) => Object.freeze({
+            pluginId: entry.id,
+            pluginName: loadedPlugin.name,
+            packageRoot: entry.packageRoot,
+            source: entry.source,
+            scope: entry.scope,
+            moduleRevision: requireServerModule(entry).revision,
+            capabilityId: capability.id,
+            capability,
+          })));
       this.activePlugins.push(Object.freeze({
         entry,
         plugin: loadedPlugin,
         activation: loadedActivation,
         ...(contribution === undefined ? {} : { contribution }),
+        ...(capabilityContributions === undefined ? {} : { capabilityContributions }),
       }));
       this.recordsById.set(entry.id, recordFor(entry, { state: "active", name: loadedPlugin.name }));
       this.logger.info({ pluginId: entry.id, pluginName: loadedPlugin.name }, "server plugin activated");
@@ -392,8 +426,10 @@ function parseActivation(value: unknown): ServerPluginActivation {
     throw new IncompatibleServerPluginError("Server plugins may contribute only one workspaceProvider");
   }
   const workspaceProviderValue = value["workspaceProvider"];
+  const capabilitiesValue = value["capabilities"];
   const candidate = {
     workspaceProvider: workspaceProviderValue === undefined ? undefined : snapshotWorkspaceProvider(workspaceProviderValue),
+    capabilities: capabilitiesValue === undefined ? undefined : snapshotCapabilities(capabilitiesValue),
     start: value["start"],
     stop: value["stop"],
     health: value["health"],
@@ -410,6 +446,7 @@ function parseActivation(value: unknown): ServerPluginActivation {
   const health = candidate.health?.bind(value);
   return Object.freeze({
     ...(candidate.workspaceProvider === undefined ? {} : { workspaceProvider: candidate.workspaceProvider }),
+    ...(candidate.capabilities === undefined ? {} : { capabilities: candidate.capabilities }),
     ...(start === undefined ? {} : { start: (signal: AbortSignal) => start(signal) }),
     ...(stop === undefined ? {} : { stop: (signal: AbortSignal) => stop(signal) }),
     ...(health === undefined ? {} : { health: (signal: AbortSignal) => health(signal) }),
@@ -419,13 +456,59 @@ function parseActivation(value: unknown): ServerPluginActivation {
 function isServerPluginActivation(value: unknown): value is ServerPluginActivation {
   if (!isRecord(value)) return false;
   const workspaceProvider = value["workspaceProvider"];
+  const capabilities = value["capabilities"];
   const start = value["start"];
   const stop = value["stop"];
   const health = value["health"];
   return (workspaceProvider === undefined || isWorkspaceProvider(workspaceProvider))
+    && (capabilities === undefined || isCapabilities(capabilities))
     && (start === undefined || typeof start === "function")
     && (stop === undefined || typeof stop === "function")
     && (health === undefined || typeof health === "function");
+}
+
+function snapshotCapabilities(value: unknown): readonly ProjectCapability[] {
+  if (!Array.isArray(value)) throw new IncompatibleServerPluginError("Server plugin capabilities must be an array");
+  const ids = new Set<string>();
+  return Object.freeze(value.map((raw, index) => snapshotProjectCapability(raw, `capability ${String(index + 1)}`, ids)));
+}
+
+function snapshotProjectCapability(value: unknown, label: string, ids: Set<string>): ProjectCapability {
+  if (!isRecord(value)) throw new IncompatibleServerPluginError(`Server plugin ${label} is invalid`);
+  const candidate = {
+    id: value["id"],
+    probe: value["probe"],
+    request: value["request"],
+  };
+  if (typeof candidate.id !== "string" || candidate.id === "") {
+    throw new IncompatibleServerPluginError(`Server plugin ${label} id must be a non-empty string`);
+  }
+  if (ids.has(candidate.id)) {
+    throw new IncompatibleServerPluginError(`Server plugin ${label} id is duplicated: ${candidate.id}`);
+  }
+  ids.add(candidate.id);
+  if (!isProjectCapability(candidate)) {
+    throw new IncompatibleServerPluginError(`Server plugin ${label} must define probe and request functions`);
+  }
+  const probe = candidate.probe.bind(value);
+  const request = candidate.request.bind(value);
+  return Object.freeze({
+    id: candidate.id,
+    probe: (workspace: CapabilityWorkspace, signal: AbortSignal) => probe(workspace, signal),
+    request: (context: CapabilityRequestContext) => request(context),
+  });
+}
+
+function isCapabilities(value: unknown): value is readonly ProjectCapability[] {
+  return Array.isArray(value) && value.every((capability) => isProjectCapability(capability));
+}
+
+function isProjectCapability(value: unknown): value is ProjectCapability {
+  return isRecord(value)
+    && typeof value["id"] === "string"
+    && value["id"] !== ""
+    && typeof value["probe"] === "function"
+    && typeof value["request"] === "function";
 }
 
 function snapshotWorkspaceProvider(value: unknown): WorkspaceProvider {

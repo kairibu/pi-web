@@ -66,6 +66,8 @@ export interface ServerPluginExecFileResult {
  */
 export interface ServerPluginActivation {
   workspaceProvider?: WorkspaceProvider;
+  /** Non-owning project capabilities attached to resolved workspace paths. */
+  capabilities?: readonly ProjectCapability[];
   /** Initialize resources within one host-bounded start invocation. */
   start?(signal: AbortSignal): MaybePromise<void>;
   /** Release resources within one host-bounded stop invocation. */
@@ -138,10 +140,8 @@ export interface ProviderRemoveContext {
   readonly signal: AbortSignal;
 }
 
-/**
- * Plugin-authored plan for a visible host terminal run. Returning this plan
- * approves the operation; it does not mean removal has completed.
- */
+/** Plugin-authored plan for a visible host terminal run. Returning this plan
+ * approves the operation; it does not mean removal has completed. */
 export interface WorkspaceRemovePlan {
   /** Human-readable title for the host-owned terminal run. */
   title: string;
@@ -154,4 +154,41 @@ export interface WorkspaceRemovePlan {
    * meaning the removal succeeded.
    */
   command: string;
+}
+
+/**
+ * A resolved workspace path handed to a non-owning project capability for
+ * detection and dispatch. Capabilities never own a workspace; they attach to
+ * whatever workspace a provider (or the kernel folder) resolved for a project.
+ */
+export interface CapabilityWorkspace {
+  /** Absolute path of the resolved workspace the capability is attached to. */
+  readonly path: string;
+}
+
+export interface CapabilityRequestContext {
+  /** Host-validated resolved workspace path the capability is attached to. */
+  readonly workspace: Readonly<CapabilityWorkspace>;
+  readonly operation: string;
+  readonly input: JsonValue;
+  readonly signal: AbortSignal;
+}
+
+/**
+ * One non-owning project capability contributed by a server plugin. A plugin
+ * can contribute several capabilities; each applies independently to resolved
+ * workspace paths and never participates in workspace ownership.
+ */
+export interface ProjectCapability {
+  /** Stable capability id, unique within the activating plugin. */
+  id: string;
+  /**
+   * Whether this capability applies to the resolved workspace path. The host
+   * calls this to attach the capability to workspaces and again before each
+   * backend dispatch so a capability is never served for a workspace it no
+   * longer matches.
+   */
+  probe(workspace: Readonly<CapabilityWorkspace>, signal: AbortSignal): Promise<boolean>;
+  /** Dispatch one capability backend operation for the attached workspace. */
+  request(context: CapabilityRequestContext): Promise<ProviderResponse>;
 }

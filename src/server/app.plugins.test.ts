@@ -54,6 +54,8 @@ describe("buildApp PI WEB plugin routes", () => {
     const service = new PiWebPluginService({
       roots: [{ path: pluginsRoot, source: "test", scope: "local" }],
       packageProvider: false,
+      // Do not consult the host PI WEB config: this test asserts exact plugin module URLs.
+      configProvider: () => ({}),
     });
     const routeApp = await buildApp({ piWebPlugins: service, clientDist: false, logger: false });
 

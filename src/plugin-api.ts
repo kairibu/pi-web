@@ -1,5 +1,5 @@
 import type { TemplateResult } from "lit";
-import type { DeleteWorkspaceFileResponse, FileContentResponse, FileTreeResponse, JsonValue, MachineKind, MoveWorkspaceFileOptions, MoveWorkspaceFileResponse, PiWebStatusResponse, TerminalCommandRunHandle, WorkspaceProviderMetadata, WorkspaceRemovalPresentation, WriteWorkspaceFileOptions, WriteWorkspaceFileResponse } from "./shared/pluginApiTypes.js";
+import type { DeleteWorkspaceFileResponse, FileContentResponse, FileTreeResponse, JsonValue, MachineKind, MoveWorkspaceFileOptions, MoveWorkspaceFileResponse, PiWebStatusResponse, TerminalCommandRunHandle, WorkspaceCapability, WorkspaceProviderMetadata, WorkspaceRemovalPresentation, WriteWorkspaceFileOptions, WriteWorkspaceFileResponse } from "./shared/pluginApiTypes.js";
 
 export type {
   FileContentMediaType,
@@ -23,6 +23,7 @@ export type {
   TerminalCommandRun,
   TerminalCommandRunHandle,
   TerminalCommandRunStatus,
+  WorkspaceCapability,
   WorkspaceProviderCapabilities,
   WorkspaceProviderMetadata,
   WorkspaceRemovalPresentation,
@@ -142,6 +143,8 @@ export interface Workspace {
   readonly isMain: boolean;
   readonly provider?: WorkspaceProviderMetadata;
   readonly removal?: WorkspaceRemovalPresentation;
+  /** Non-owning project capabilities attached to this workspace path. */
+  readonly capabilities?: readonly WorkspaceCapability[];
 }
 
 export interface WorkspaceFiles {

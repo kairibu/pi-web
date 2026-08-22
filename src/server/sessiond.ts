@@ -25,6 +25,10 @@ import {
   eligibleWorkspaceProviderContributions,
   WorkspaceProviderRegistry,
 } from "./workspaces/workspaceProviderRegistry.js";
+import {
+  eligibleCapabilityContributions,
+  WorkspaceCapabilityRegistry,
+} from "./workspaces/workspaceCapabilityRegistry.js";
 import { sessiondSocketPath } from "../sessiond/config.js";
 import { TerminalService } from "./terminals/terminalService.js";
 import { registerTerminalRoutes } from "./terminals/terminalRoutes.js";
@@ -192,8 +196,13 @@ async function createSessionDaemonRuntime() {
     auth.subscribe(() => { catalogRefresher.requestRefresh(); });
     const projects = new ProjectService(new ProjectStore(projectStorePath(daemonEnvironment)));
     const providerHealth = await serverPlugins.inspectHealth();
+    const workspaceCapabilities = new WorkspaceCapabilityRegistry({
+      contributions: eligibleCapabilityContributions(serverPlugins.capabilityContributions(), providerHealth),
+      logger: app.log,
+    });
     const workspaceProviders = new WorkspaceProviderRegistry({
       contributions: eligibleWorkspaceProviderContributions(serverPlugins.providerContributions(), providerHealth),
+      capabilities: workspaceCapabilities,
       logger: app.log,
     });
     const workspaceProviderRuntime = createWorkspaceProviderRuntimeSnapshot(

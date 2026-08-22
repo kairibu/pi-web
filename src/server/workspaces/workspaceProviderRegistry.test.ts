@@ -4,6 +4,7 @@ import type { JsonValue, ProviderRemoveContext, ProviderRequestContext, Provider
 import type { Project } from "../types.js";
 import type { ServerPluginProviderContribution } from "../plugins/serverPluginRuntime.js";
 import { ProjectScopedSpawnTargetResolver } from "../sessions/spawnTargetResolver.js";
+import { WorkspaceCapabilityRegistry } from "./workspaceCapabilityRegistry.js";
 import {
   eligibleWorkspaceProviderContributions,
   WorkspaceProviderRegistry,
@@ -841,6 +842,7 @@ function registryFixture(
   return {
     registry: new WorkspaceProviderRegistry({
       contributions,
+      capabilities: emptyCapabilities(),
       logger,
       ...(options.providerTimeoutMs === undefined ? {} : { providerTimeoutMs: options.providerTimeoutMs }),
       ...(options.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: options.requestTimeoutMs }),
@@ -848,6 +850,10 @@ function registryFixture(
     }),
     logger,
   };
+}
+
+function emptyCapabilities(): WorkspaceCapabilityRegistry {
+  return new WorkspaceCapabilityRegistry({ contributions: [], logger: { warn: vi.fn() } });
 }
 
 function contribution(
