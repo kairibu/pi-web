@@ -93,7 +93,8 @@ function renderElementList(html: HtmlTemplateTag, state: SysideWorkspaceUiState,
   if (state.listError !== undefined) return html`<p class="syside-error-message">${state.listError}</p>`;
   if (state.elements === undefined || state.elements.length === 0) return html`<p class="syside-muted">No elements.</p>`;
   const selectedKey = state.selectedQualifiedName === undefined ? undefined : qualifiedNameKey(state.selectedQualifiedName);
-    return state.elements.map((element) => {
+  return state.elements.map((element) => {
+    if (element.qualified_name.length === 0) return; // do not list anonymous elements here, they cant be shown in details view.
     const shortName = elementShortName(element);
     const isSelected = selectedKey === qualifiedNameKey(element.qualified_name);
     const rowClass = `${isSelected ? "syside-element-row is-selected" : "syside-element-row"}${shortName ? " has-short" : ""}`;
