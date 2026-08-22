@@ -51,6 +51,10 @@ function fakeService(): { service: SysideCapabilityService; calls: ServiceCall[]
         subject: null,
         inputs: null,
         outputs: null,
+        nested_ports: null,
+        nested_actions: null,
+        nested_flows: null,
+        owned_elements: null,
       });
     }),
   };

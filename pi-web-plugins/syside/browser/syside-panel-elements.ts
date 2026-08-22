@@ -157,6 +157,10 @@ function renderTextualDetails(html: HtmlTemplateTag, details: SysMlElementDetail
     ${renderElementSection(html, "Subject", details.subject, controller, context)}
     ${renderElementListSection(html, "Inputs", details.inputs, controller, context)}
     ${renderElementListSection(html, "Outputs", details.outputs, controller, context)}
+    ${renderElementListSection(html, "Nested Ports", details.nested_ports, controller, context)}
+    ${renderElementListSection(html, "Nested Actions", details.nested_actions, controller, context)}
+    ${renderElementListSection(html, "Nested Flows", details.nested_flows, controller, context)}
+    ${renderElementListSection(html, "Owned Elements", details.owned_elements, controller, context)}
   `;
 }
 
@@ -194,16 +198,23 @@ function renderElementSection(html: HtmlTemplateTag, label: string, element: Sys
 }
 
 function renderElementLink(html: HtmlTemplateTag, element: SysMlElement, controller: SysideUiController, context: WorkspacePanelContext) {
-  //todo: from_qn is not used, because its not handled by tooltip. 
+  // Elements without a qualified name (unnamed owned elements) cannot be
+  // navigated — the backend rejects empty qualified names — so they render as
+  // plain non-interactive text instead of a link that always fails. Unnamed
+  // entries usually carry no declared name either, so the type label is the
+  // visible fallback.
+  if (element.qualified_name.length === 0) {
+    const name = elementDisplayName(element);
+    return html`<li>${name === "" ? elementTypeLabel(element.type) : name}</li>`;
+  }
+  // todo: from_qn is not used, because its not handled by tooltip. 
   return html`
     <li>
-      
-        <button
-          type="button"
-          class="syside-link"
-          @click=${() => { controller.selectElement(context, element.qualified_name); }}
-        >${elementDisplayName(element)}</button>
-      
+      <button
+        type="button"
+        class="syside-link"
+        @click=${() => { controller.selectElement(context, element.qualified_name); }}
+      >${elementDisplayName(element)}</button>
     </li>
   `;
 }

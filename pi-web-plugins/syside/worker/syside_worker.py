@@ -278,8 +278,32 @@ def handle_element_details(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _related_summaries(node: Any, attribute: str, fallback_attribute: str | None = None) -> list[dict[str, Any]] | None:
+    """Element summaries of one relation, or its definition-side fallback.
+
+    Usages name their nested usages ``nested_ports``/``nested_actions``/
+    ``nested_flows`` while Definitions name the same relations
+    ``owned_ports``/``owned_actions``/``owned_flows``, so the single wire
+    field for each relation reads the usage attribute and falls back to the
+    definition attribute when the element kind has no nested surface. Returns
+    None when the relation is absent, empty, or an entry cannot be summarized
+    (the ``subject`` hardening precedent: one exotic entry must not fail the
+    whole element-details request), never an empty list.
+    """
+    values = getattr(node, attribute, None)
+    if values is None and fallback_attribute is not None:
+        values = getattr(node, fallback_attribute, None)
+    if values is None:
+        return None
+    try:
+        collected = [_sysml_element(entry) for entry in values]
+    except Exception:  # noqa: BLE001 - an exotic relation entry must not fail the request
+        return None
+    return collected or None
+
+
 def _element_detail(node: Any) -> dict[str, Any]:
-    """Full detail of one element: documentation, heritage, subject, and I/O."""
+    """Full detail of one element: documentation, heritage, subject, I/O, and owned structure."""
     documentation = [str(doc.body) for doc in node.documentation]
     # The syside package exposes no subsetting surface, so subsetting is
     # reported as None instead of guessing from `heritage`: the heritage
@@ -326,6 +350,10 @@ def _element_detail(node: Any) -> dict[str, Any]:
         "subject": subject,
         "inputs": inputs,
         "outputs": outputs,
+        "nested_ports": _related_summaries(node, "nested_ports", "owned_ports"),
+        "nested_actions": _related_summaries(node, "nested_actions", "owned_actions"),
+        "nested_flows": _related_summaries(node, "nested_flows", "owned_flows"),
+        "owned_elements": _related_summaries(node, "owned_elements"),
     }
 
 

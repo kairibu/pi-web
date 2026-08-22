@@ -725,6 +725,10 @@ describe("bundled SysIDE browser plugin", () => {
       subject: null,
       inputs: null,
       outputs: null,
+      nested_ports: null,
+      nested_actions: null,
+      nested_flows: null,
+      owned_elements: null,
     };
     const wingDetail: JsonValue = {
       type: "syside.PartDefinition",
@@ -738,6 +742,10 @@ describe("bundled SysIDE browser plugin", () => {
       subject: null,
       inputs: null,
       outputs: null,
+      nested_ports: null,
+      nested_actions: null,
+      nested_flows: null,
+      owned_elements: null,
     };
     const backend = backendFixture({
       errors: [],
@@ -763,6 +771,114 @@ describe("bundled SysIDE browser plugin", () => {
 
     expect(container.querySelector(".syside-details-header strong")?.textContent).toBe("m::Tail");
     expect(container.textContent).toContain("Tail docs.");
+    render(null, container);
+  });
+
+  it("renders nested ports, nested actions, nested flows, and owned elements after outputs", async () => {
+    const portFixture = elementFixture("syside.PortUsage", "in", ["m", "go", "in"], null);
+    const actionFixture = elementFixture("syside.ActionUsage", "sub", ["m", "go", "sub"], null);
+    const flowFixture = elementFixture("syside.FlowUsage", "f", ["m", "go", "f"], "fl");
+    const backend = backendFixture({
+      errors: [],
+      elements: [elementFixture("syside.ActionUsage", "go", ["m", "go"], null)],
+      details: {
+        [JSON.stringify(["m", "go"])]: {
+          type: "syside.ActionUsage",
+          declared_name: "go",
+          qualified_name: ["m", "go"],
+          declared_short_name: null,
+          documentation: null,
+          heritage: null,
+          subsetting: null,
+          filepath: "/model/Model.sysml",
+          subject: null,
+          inputs: null,
+          outputs: [],
+          nested_ports: [portFixture],
+          nested_actions: [actionFixture],
+          nested_flows: [flowFixture],
+          owned_elements: [portFixture, actionFixture],
+        },
+      },
+    });
+    const panel = requiredPanel(activate("syside"));
+    const container = document.createElement("div");
+    const context = await mountAndOpenElements(panel, backend, container);
+
+    button(container, "go").click();
+    await settleBackend();
+    render(panel.render(context), container);
+
+    const headings = [...container.querySelectorAll(".syside-details-section h3")].map((node) => node.textContent);
+    expect(headings).toEqual([
+      "Documentation",
+      "Heritage",
+      "Subsetting",
+      "Subject",
+      "Inputs",
+      "Outputs",
+      "Nested Ports",
+      "Nested Actions",
+      "Nested Flows",
+      "Owned Elements",
+    ]);
+    const links = [...container.querySelectorAll(".syside-details-section .syside-link")].map((node) => node.textContent);
+    expect(links).toEqual(["in", "sub", "fl", "in", "sub"]);
+    render(null, container);
+  });
+
+  it("renders unnamed owned elements as non-navigable text instead of dead links", async () => {
+    const backend = backendFixture({
+      errors: [],
+      elements: [elementFixture("syside.ActionUsage", "go", ["m", "go"], null)],
+      details: {
+        [JSON.stringify(["m", "go"])]: {
+          type: "syside.ActionUsage",
+          declared_name: "go",
+          qualified_name: ["m", "go"],
+          declared_short_name: null,
+          documentation: null,
+          heritage: null,
+          subsetting: null,
+          filepath: "/model/Model.sysml",
+          subject: null,
+          inputs: null,
+          outputs: null,
+          nested_ports: null,
+          nested_actions: null,
+          nested_flows: null,
+          // One named entry plus an unnamed kind with no name at all and an
+          // unnamed entry that still carries a computed name (the worker
+          // falls back to node.name when nothing is declared).
+          owned_elements: [
+            elementFixture("syside.ActionUsage", "sub", ["m", "go", "sub"], null),
+            elementFixture("syside.Documentation", "", [], null),
+            elementFixture("syside.AttributeUsage", "x", [], null),
+          ],
+        },
+      },
+    });
+    const panel = requiredPanel(activate("syside"));
+    const container = document.createElement("div");
+    const context = await mountAndOpenElements(panel, backend, container);
+
+    button(container, "go").click();
+    await settleBackend();
+    render(panel.render(context), container);
+
+    const heading = [...container.querySelectorAll(".syside-details-section h3")]
+      .find((node) => node.textContent === "Owned Elements");
+    if (heading === undefined) throw new Error("Expected an Owned Elements section");
+    const section = heading.parentElement;
+    if (section === null) throw new Error("Expected the Owned Elements section element");
+
+    // Named entries keep their navigable link; unnamed entries render as
+    // plain text with the type label standing in when the entry has no name
+    // at all (and no dead link that would error the details request).
+    expect([...section.querySelectorAll(".syside-link")].map((node) => node.textContent)).toEqual(["sub"]);
+    expect([...section.querySelectorAll("li")].map((node) => node.textContent.trim())).toEqual(["sub", "Documentation", "x"]);
+    expect([...section.querySelectorAll("li button")]).toHaveLength(1);
+    expect(section.querySelector(".syside-link")?.textContent).toBe("sub");
     render(null, container);
   });
 
@@ -917,6 +1033,10 @@ const defaultDetailFixture: JsonValue = {
   subject: null,
   inputs: null,
   outputs: null,
+  nested_ports: null,
+  nested_actions: null,
+  nested_flows: null,
+  owned_elements: null,
 };
 
 function backendFixture(seed: BackendFixtureSeed = {}) {

@@ -168,4 +168,9 @@ Checklist, in dependency order — one commit, all steps:
   smoke tests against the installed `syside` package are the only way to
   verify the Python adapter calls (`try_load_model`, `Element`,
   `user_docs`, `element_id`, …) — those calls were verified against the
-  installed package API, so re-verify after any `syside` package upgrade.
+  installed package API, so re-verify after any `syside` package upgrade. The
+  re-verification must include the element-details relation attributes
+  (`nested_ports`/`owned_ports`, `nested_actions`/`owned_actions`,
+  `nested_flows`/`owned_flows`, `owned_elements`): `syside_worker.py` reads
+  them via a `getattr` fallback, so a `syside` rename would silently degrade
+  every section to `None` with no loud failure.

@@ -60,6 +60,14 @@ export interface SysMlElementDetail extends SysMlElement {
   inputs: SysMlElement[] | null;
   /** Output parameters/slots, only for action usages and definitions, or null. */
   outputs: SysMlElement[] | null;
+  /** Nested port usages (owned ports for definitions), or null when none. */
+  nested_ports: SysMlElement[] | null;
+  /** Nested action usages (owned actions for definitions), or null when none. */
+  nested_actions: SysMlElement[] | null;
+  /** Nested flow usages (owned flows for definitions), or null when none. */
+  nested_flows: SysMlElement[] | null;
+  /** Elements directly owned by the element, or null when none. */
+  owned_elements: SysMlElement[] | null;
 }
 
 /** Per-package element counts as reported by `survey`. */
@@ -103,6 +111,10 @@ export function parseSysideElementDetailsResponse(value: unknown): SysMlElementD
     subject: requireSysMlElementOrNull(record["subject"], "subject"),
     inputs: requireSysMlElementArrayOrNull(record["inputs"], "inputs"),
     outputs: requireSysMlElementArrayOrNull(record["outputs"], "outputs"),
+    nested_ports: requireSysMlElementArrayOrNull(record["nested_ports"], "nested_ports"),
+    nested_actions: requireSysMlElementArrayOrNull(record["nested_actions"], "nested_actions"),
+    nested_flows: requireSysMlElementArrayOrNull(record["nested_flows"], "nested_flows"),
+    owned_elements: requireSysMlElementArrayOrNull(record["owned_elements"], "owned_elements"),
   };
 }
 

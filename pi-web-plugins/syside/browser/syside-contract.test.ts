@@ -93,6 +93,10 @@ describe("parseSysideElementDetailsResponse", () => {
       subject: null,
       inputs: null,
       outputs: null,
+      nested_ports: null,
+      nested_actions: null,
+      nested_flows: null,
+      owned_elements: null,
     };
 
     expect(parseSysideElementDetailsResponse(value)).toEqual(value);
@@ -111,6 +115,13 @@ describe("parseSysideElementDetailsResponse", () => {
       subject: { type: "syside.PartDefinition", declared_name: "Vehicle", qualified_name: ["m", "Vehicle"], declared_short_name: null },
       inputs: [{ type: "syside.ReferenceUsage", declared_name: "a", qualified_name: ["m", "go", "a"], declared_short_name: null }],
       outputs: [],
+      nested_ports: [{ type: "syside.PortUsage", declared_name: "in", qualified_name: ["m", "go", "in"], declared_short_name: null }],
+      nested_actions: [],
+      nested_flows: null,
+      owned_elements: [
+        { type: "syside.ActionUsage", declared_name: "sub", qualified_name: ["m", "go", "sub"], declared_short_name: null },
+        { type: "syside.PartUsage", declared_name: "Wing", qualified_name: ["m", "go", "Wing"], declared_short_name: "W" },
+      ],
     };
 
     expect(parseSysideElementDetailsResponse(value)).toEqual(value);
@@ -135,6 +146,14 @@ describe("parseSysideElementDetailsResponse", () => {
       .toThrow("SysIDE subject must be an object");
     expect(() => parseSysideElementDetailsResponse({ ...base, documentation: null, heritage: null, subsetting: null, filepath: "p", subject: null, inputs: "in" }))
       .toThrow("Expected array or null field: inputs");
+    expect(() => parseSysideElementDetailsResponse({ ...base, documentation: null, heritage: null, subsetting: null, filepath: "p", subject: null, inputs: null, outputs: null, nested_ports: "ports" }))
+      .toThrow("Expected array or null field: nested_ports");
+    expect(() => parseSysideElementDetailsResponse({ ...base, documentation: null, heritage: null, subsetting: null, filepath: "p", subject: null, inputs: null, outputs: null, nested_ports: null, nested_actions: 3 }))
+      .toThrow("Expected array or null field: nested_actions");
+    expect(() => parseSysideElementDetailsResponse({ ...base, documentation: null, heritage: null, subsetting: null, filepath: "p", subject: null, inputs: null, outputs: null, nested_ports: null, nested_actions: null, nested_flows: [{}] }))
+      .toThrow("Expected non-empty string field: nested_flows entry 0 type");
+    expect(() => parseSysideElementDetailsResponse({ ...base, documentation: null, heritage: null, subsetting: null, filepath: "p", subject: null, inputs: null, outputs: null, nested_ports: null, nested_actions: null, nested_flows: null, owned_elements: true }))
+      .toThrow("Expected array or null field: owned_elements");
     expect(() => parseSysideElementDetailsResponse(null)).toThrow("must be an object");
   });
 });
