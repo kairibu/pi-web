@@ -89,8 +89,8 @@ function renderSysidePanel(html: HtmlTemplateTag, controller: SysideUiController
         <strong>SysIDE</strong>
         <div class="syside-toolbar-actions">
           <button type="button" aria-pressed=${String(state.view === "overview")} @click=${() => { controller.setView(context, "overview"); }}>Overview</button>
+          <button type="button" aria-pressed=${String(state.view === "elements")} @click=${() => { controller.setView(context, "elements"); }}>Browse</button>
           <button type="button" aria-pressed=${String(state.view === "check")} ?disabled=${state.loading} @click=${() => { controller.setView(context, "check"); void controller.check(context); }}>Check</button>
-          <button type="button" aria-pressed=${String(state.view === "elements")} @click=${() => { controller.setView(context, "elements"); }}>Elements</button>
         </div>
       </section>
       ${state.error === undefined ? null : html`<div class="syside-error" role="alert">${state.error}</div>`}

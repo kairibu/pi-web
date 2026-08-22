@@ -1,5 +1,7 @@
 import type { WorkspacePanelContext } from "@jmfederico/pi-web/plugin-api";
 import {
+  copyIconSvg,
+  insertCopyNamePrompt,
   insertInvestigatePrompt,
   insertTaskPrompt,
   investigateIconSvg,
@@ -68,13 +70,13 @@ const PALETTE_STYLES = `
 `;
 
 /**
- * Vanilla custom element providing horizontal Investigate and Task controls
- * plus a conditional inline task input, for the selected element in the
- * SysIDE detail view. The Investigate button inserts a fixed investigation
- * prompt; the Task button opens an inline input whose submitted text is
- * inserted as a custom prompt. Purely imperative (no Lit), because plugin
- * modules load without an import map and a shadow root is cheap to build by
- * hand.
+ * Vanilla custom element providing horizontal Investigate, Copy name, and Task
+ * controls plus a conditional inline task input, for the selected element in
+ * the SysIDE detail view. The Investigate button inserts a fixed
+ * investigation prompt; the Copy name button inserts the bare qualified name;
+ * the Task button opens an inline input whose submitted text is inserted as a
+ * custom prompt. Purely imperative (no Lit), because plugin modules load
+ * without an import map and a shadow root is cheap to build by hand.
  *
  * Interaction semantics mirror the relationship-link tooltip: a trimmed
  * non-empty Enter submits, Escape or blur closes without inserting, and
@@ -144,6 +146,7 @@ export function defineSysideActionPaletteElement(): void {
         <style>${PALETTE_STYLES}</style>
         <div class="palette" role="group" aria-label="Element actions">
           <button type="button" class="palette-investigate" aria-label="Investigate element">${investigateIconSvg}<span>Investigate</span></button>
+          <button type="button" class="palette-copy-name" aria-label="Copy qualified name">${copyIconSvg}<span>Copy name</span></button>
           <button type="button" class="palette-task" aria-label="Custom task for element">${taskIconSvg}<span>Task</span></button>
           <input type="text" class="palette-input" aria-label="Task for element" placeholder="Task for element" />
         </div>
@@ -154,6 +157,10 @@ export function defineSysideActionPaletteElement(): void {
 
       shadow.querySelector<HTMLButtonElement>(".palette-investigate")?.addEventListener("click", () => {
         insertInvestigatePrompt(this.contextValue?.prompt, this.filepathValue, this.qualifiedNameValue);
+      });
+
+      shadow.querySelector<HTMLButtonElement>(".palette-copy-name")?.addEventListener("click", () => {
+        insertCopyNamePrompt(this.contextValue?.prompt, this.qualifiedNameValue);
       });
 
       shadow.querySelector<HTMLButtonElement>(".palette-task")?.addEventListener("click", () => {

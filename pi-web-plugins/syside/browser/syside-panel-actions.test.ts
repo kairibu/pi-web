@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PluginPromptEditor } from "@jmfederico/pi-web/plugin-api";
 import {
+  copyIconSvg,
+  insertCopyNamePrompt,
   insertInvestigatePrompt,
   insertTaskPrompt,
   investigateIconSvg,
@@ -64,10 +66,25 @@ describe("insertTaskPrompt", () => {
   });
 });
 
+describe("insertCopyNamePrompt", () => {
+  it("inserts only the bare qualified name, no location clause or wording", () => {
+    const { prompt, insertText } = makePrompt();
+    insertCopyNamePrompt(prompt, ["m", "Wing"]);
+    expect(insertText).toHaveBeenCalledWith("m::Wing");
+  });
+
+  it("is a no-op when no prompt editor is provided", () => {
+    expect(() => { insertCopyNamePrompt(undefined, ["m", "Wing"]); }).not.toThrow();
+  });
+});
+
 describe("shared icons", () => {
   it("exposes distinct non-empty SVG labels", () => {
     expect(investigateIconSvg).toContain("<svg");
     expect(taskIconSvg).toContain("<svg");
+    expect(copyIconSvg).toContain("<svg");
     expect(investigateIconSvg).not.toBe(taskIconSvg);
+    expect(investigateIconSvg).not.toBe(copyIconSvg);
+    expect(taskIconSvg).not.toBe(copyIconSvg);
   });
 });

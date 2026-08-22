@@ -19,6 +19,12 @@ export const investigateIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width
 export const taskIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3H8"/><path d="m15.007 5.008 3.987 3.986"/><path d="M20 15v4"/><path d="M21.174 6.813a2.82 2.82 0 0 0-3.986-3.987L3.842 16.175a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="M22 17h-4"/><path d="M4 5v4"/><path d="M6 7H2"/><path d="M9 2v2"/></svg>`;
 
 /**
+ * Toolbar icon for the "Copy name" action (two overlapping rounded rects).
+ * Same sharing rationale and accessibility contract as the other icons.
+ */
+export const copyIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`;
+
+/**
  * Insert the fixed investigation prompt for an element into the given prompt
  * editor. `filepath` is optional (relationship elements may have no source
  * file); an absent/empty file simply omits the location clause of the prompt.
@@ -43,4 +49,16 @@ export function insertTaskPrompt(
   task: string,
 ): void {
   prompt?.insertText(editPrompt(filepath, qualifiedNameDisplay(qualifiedName), task));
+}
+
+/**
+ * Insert only the element's qualified name (e.g. `m::Wing`) into the given
+ * prompt editor — no location clause and no surrounding wording, unlike the
+ * Investigate prompt. A missing editor is a no-op.
+ */
+export function insertCopyNamePrompt(
+  prompt: PluginPromptEditor | undefined,
+  qualifiedName: string[],
+): void {
+  prompt?.insertText(qualifiedNameDisplay(qualifiedName));
 }

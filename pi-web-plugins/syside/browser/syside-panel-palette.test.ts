@@ -92,6 +92,16 @@ describe("SysideActionPalette", () => {
     );
   });
 
+  it("inserts the qualified name on Copy name click", () => {
+    const insertText = vi.fn();
+    const el = mountPalette(["m", "Wing"], "Aircraft.sysml", makeContext(insertText));
+
+    paletteButton(el, "palette-copy-name").click();
+
+    // Bare qualified name only — no Investigate sentence, no location clause.
+    expect(insertText).toHaveBeenCalledWith("m::Wing");
+  });
+
   it("reveals the task input on Task click without inserting", () => {
     const insertText = vi.fn();
     const el = mountPalette(["m", "Wing"], "Aircraft.sysml", makeContext(insertText));
@@ -171,6 +181,24 @@ describe("SysideActionPalette", () => {
     expect(input.classList.contains("is-visible")).toBe(true);
     investigate.click();
     expect(insertText).toHaveBeenCalledTimes(1);
+    expect(input.classList.contains("is-visible")).toBe(true);
+  });
+
+  it("keeps the input open when focus moves to Copy name and inserts on click", () => {
+    const insertText = vi.fn();
+    const el = mountPalette(["m", "Wing"], "Aircraft.sysml", makeContext(insertText));
+    paletteButton(el, "palette-task").click();
+
+    const input = taskInput(el);
+    const copyName = paletteButton(el, "palette-copy-name");
+    // Mirror of the Investigate case: focus moving to the sibling Copy name
+    // button (inside the shadow root) must not blur-close the open input.
+    input.dispatchEvent(new FocusEvent("blur", { relatedTarget: copyName }));
+
+    expect(input.classList.contains("is-visible")).toBe(true);
+    copyName.click();
+    expect(insertText).toHaveBeenCalledTimes(1);
+    expect(insertText).toHaveBeenCalledWith("m::Wing");
     expect(input.classList.contains("is-visible")).toBe(true);
   });
 

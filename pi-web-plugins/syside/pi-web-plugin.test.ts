@@ -255,7 +255,7 @@ describe("bundled SysIDE browser plugin", () => {
     render(panel.render(context), container);
     expect([...container.querySelectorAll(".syside-error-message")].map((node) => node.textContent)).toEqual(["Unknown reference 'Wing'"]);
 
-    button(container, "Elements").click();
+    button(container, "Browse").click();
     // Survey and the first unfiltered list request are issued immediately.
     expect(backend.request).toHaveBeenCalledWith("survey", null);
     expect(backend.request).toHaveBeenCalledWith("list-elements", null);
@@ -299,8 +299,8 @@ describe("bundled SysIDE browser plugin", () => {
     expect(packages[1]?.querySelector(".syside-package-summary")?.textContent).toBe("parts: 1");
     expect(container.querySelectorAll(".syside-package-item .syside-count-value")).toHaveLength(0);
     expect(button(container, "Overview").getAttribute("aria-pressed")).toBe("true");
+    expect(button(container, "Browse").getAttribute("aria-pressed")).toBe("false");
     expect(button(container, "Check").getAttribute("aria-pressed")).toBe("false");
-    expect(button(container, "Elements").getAttribute("aria-pressed")).toBe("false");
     render(null, container);
   });
 
@@ -324,7 +324,7 @@ describe("bundled SysIDE browser plugin", () => {
 
     const submenu = container.querySelector(".syside-panel .syside-split .syside-elements-submenu");
     if (submenu === null) throw new Error("Expected the element-view submenu inside .syside-split");
-    expect(button(container, "Elements").getAttribute("aria-pressed")).toBe("true");
+    expect(button(container, "Browse").getAttribute("aria-pressed")).toBe("true");
     // The <pi-web-syside-select-sync> element schedules a microtask on render
     // to set the filter <select> values after their <option> children commit
     // (Lit binds .value before options exist on the first submenu render).
@@ -687,7 +687,7 @@ describe("bundled SysIDE browser plugin", () => {
     render(panel.render(context), container);
     await settleBackend();
     render(panel.render(context), container);
-    button(container, "Elements").click();
+    button(container, "Browse").click();
     await settleBackend();
     render(panel.render(context), container);
     button(container, "Wing").click();
@@ -702,6 +702,12 @@ describe("bundled SysIDE browser plugin", () => {
     expect(insertText).toHaveBeenCalledWith(
       "Investigate m::Wing and summarise its function interfaces and requirements. The element is located in /model/Model.sysml",
     );
+
+    const copyName = palette.shadowRoot?.querySelector<HTMLButtonElement>(".palette-copy-name");
+    if (copyName === undefined || copyName === null) throw new Error("Expected a Copy name button in the palette");
+    copyName.click();
+    // Bare qualified name, not the Investigate sentence and no location clause.
+    expect(insertText).toHaveBeenCalledWith("m::Wing");
 
     const task = palette.shadowRoot?.querySelector<HTMLButtonElement>(".palette-task");
     if (task === undefined || task === null) throw new Error("Expected a Task button in the palette");
@@ -961,7 +967,7 @@ describe("bundled SysIDE browser plugin", () => {
     render(panel.render(context), container);
     await settleBackend();
     render(panel.render(context), container);
-    button(container, "Elements").click();
+    button(container, "Browse").click();
     await settleBackend();
     render(panel.render(context), container);
 
@@ -1122,7 +1128,7 @@ async function mountAndOpenElements(
   render(panel.render(context), container);
   await settleBackend();
   render(panel.render(context), container);
-  button(container, "Elements").click();
+  button(container, "Browse").click();
   await settleBackend();
   render(panel.render(context), container);
   return context;
